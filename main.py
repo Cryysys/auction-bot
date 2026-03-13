@@ -27,11 +27,9 @@ class AuctionBot(commands.Bot):
         await self.tree.sync()
         print(f'Synced commands for {self.user}')
 
-bot = AuctionBot()
-
-class ItemPaginationView(View):
+bot = AuctionBot()class ItemPaginationView(View):
     def __init__(self, items, user_id):
-        super().__init__(timeout=120)  # Increased timeout
+        super().__init__(timeout=120)
         self.items = items
         self.user_id = user_id
         self.current = 0
@@ -41,9 +39,9 @@ class ItemPaginationView(View):
     def update_buttons(self):
         self.clear_items()
         if self.current > 0:
-            self.add_item(Button(label="◀️ Previous", style=discord.ButtonStyle.blurple, custom_id="prev"))
+            self.add_item(Button(label="◀️ Previous", style=discord.ButtonStyle.blurple, custom_id=f"prev_{self.current}"))
         if self.current < len(self.items) - 1:
-            self.add_item(Button(label="Next ▶️", style=discord.ButtonStyle.blurple, custom_id="next"))
+            self.add_item(Button(label="Next ▶️", style=discord.ButtonStyle.blurple, custom_id=f"next_{self.current}"))
         self.add_item(Button(label="❌ Close", style=discord.ButtonStyle.red, custom_id="close"))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -54,55 +52,59 @@ class ItemPaginationView(View):
 
     async def on_timeout(self):
         try:
-            await self.message.edit(view=None)
+            if self.message:
+                await self.message.edit(view=None)
+        except:
+            pass
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item):
+        print(f"Pagination error: {error}")
+        try:
+            await interaction.response.send_message("An error occurred. Please try again.", ephemeral=True)
         except:
             pass
 
     async def show_current(self, interaction: discord.Interaction):
-        item_id, name, url = self.items[self.current]
-        embed = discord.Embed(
-            title=f"Item #{item_id}",
-            description=name,
-            color=discord.Color.blue()
-        )
-        if url:
-            embed.set_image(url=url)
-        embed.set_footer(text=f"Item {self.current+1} of {len(self.items)}")
-        await interaction.response.edit_message(embed=embed, view=self)
+        try:
+            item_id, name, url = self.items[self.current]
+            embed = discord.Embed(
+                title=f"Item #{item_id}",
+                description=name,
+                color=discord.Color.blue()
+            )
+            if url:
+                embed.set_image(url=url)
+            embed.set_footer(text=f"Item {self.current+1} of {len(self.items)}")
+            await interaction.response.edit_message(embed=embed, view=self)
+        except Exception as e:
+            print(f"Error in show_current: {e}")
+            await interaction.followup.send("Error displaying item.", ephemeral=True)
 
-    @discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.blurple, custom_id="prev")
+    @discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.blurple)
     async def prev_button(self, interaction: discord.Interaction, button: Button):
+        print(f"Previous button pressed, current={self.current}")
         self.current -= 1
         self.update_buttons()
         await self.show_current(interaction)
 
-    @discord.ui.button(label="Next ▶️", style=discord.ButtonStyle.blurple, custom_id="next")
+    @discord.ui.button(label="Next ▶️", style=discord.ButtonStyle.blurple)
     async def next_button(self, interaction: discord.Interaction, button: Button):
+        print(f"Next button pressed, current={self.current}")
         self.current += 1
         self.update_buttons()
         await self.show_current(interaction)
 
-    @discord.ui.button(label="❌ Close", style=discord.ButtonStyle.red, custom_id="close")
+    @discord.ui.button(label="❌ Close", style=discord.ButtonStyle.red)
     async def close_button(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.edit_message(content="Closed.", embed=None, view=None)
-        self.stop()
+        print("Close button pressed")
+        try:
+            await interaction.response.edit_message(content="Closed.", embed=None, view=None)
+            self.stop()
+        except Exception as e:
+            print(f"Error closing: {e}")
+            await interaction.followup.send("Error closing.", ephemeral=True)
 
-    @discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.blurple, custom_id="prev")
-    async def prev_button(self, interaction: discord.Interaction, button: Button):
-        self.current -= 1
-        self.update_buttons()
-        await self.show_current(interaction)
 
-    @discord.ui.button(label="Next ▶️", style=discord.ButtonStyle.blurple, custom_id="next")
-    async def next_button(self, interaction: discord.Interaction, button: Button):
-        self.current += 1
-        self.update_buttons()
-        await self.show_current(interaction)
-
-    @discord.ui.button(label="❌ Close", style=discord.ButtonStyle.red, custom_id="close")
-    async def close_button(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.edit_message(content="Closed.", embed=None, view=None)
-        self.stop()
 # ----- Helper Functions -----
 def parse_duration(duration_str):
     pattern = re.compile(r'((?P<hours>\d+)h)?((?P<minutes>\d+)m)?')
@@ -608,7 +610,6 @@ async def items(interaction: discord.Interaction):
         await interaction.response.send_message("The pool is empty.")
         return
     view = ItemPaginationView(items, interaction.user.id)
-    # Show first item
     item_id, name, url = items[0]
     embed = discord.Embed(
         title=f"Item #{item_id}",
@@ -619,6 +620,7 @@ async def items(interaction: discord.Interaction):
         embed.set_image(url=url)
     embed.set_footer(text=f"Item 1 of {len(items)}")
     await interaction.response.send_message(embed=embed, view=view)
+    # Store the message in the view for later editing on timeout
     view.message = await interaction.original_response()
 
 @bot.tree.command(name="points", description="Check your current points")
