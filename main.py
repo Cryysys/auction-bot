@@ -29,6 +29,8 @@ class AuctionBot(commands.Bot):
 
 bot = AuctionBot()
 
+# ========== PAGINATION VIEWS ==========
+
 class ItemPaginationView(View):
     def __init__(self, items, user_id):
         super().__init__(timeout=120)
@@ -60,42 +62,99 @@ class ItemPaginationView(View):
             pass
 
     async def show_current(self, interaction: discord.Interaction):
-    try:
-        item_id, name, url = self.items[self.current]
+        try:
+            item_id, name, url = self.items[self.current]
+            embed = discord.Embed(
+                title=f"Item #{item_id}",
+                description=name,
+                color=discord.Color.blue()
+            )
+            if url:
+                embed.set_image(url=url)
+            embed.set_footer(text=f"Item {self.current+1} of {len(self.items)}")
+            await interaction.edit_original_response(embed=embed, view=self)
+        except Exception as e:
+            await interaction.followup.send(f"Error: {e}", ephemeral=True)
+
+    @discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.blurple)
+    async def prev_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        self.current -= 1
+        self.update_buttons()
+        await self.show_current(interaction)
+
+    @discord.ui.button(label="Next ▶️", style=discord.ButtonStyle.blurple)
+    async def next_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        self.current += 1
+        self.update_buttons()
+        await self.show_current(interaction)
+
+    @discord.ui.button(label="❌ Close", style=discord.ButtonStyle.red)
+    async def close_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        await interaction.edit_original_response(content="Closed.", embed=None, view=None)
+        self.stop()
+
+class AdminItemListView(View):
+    def __init__(self, items, user_id):
+        super().__init__(timeout=120)
+        self.items = items
+        self.user_id = user_id
+        self.current_page = 0
+        self.items_per_page = 20
+        self.total_pages = (len(items) + self.items_per_page - 1) // self.items_per_page
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.clear_items()
+        if self.current_page > 0:
+            self.add_item(Button(label="◀️ Previous", style=discord.ButtonStyle.blurple))
+        if self.current_page < self.total_pages - 1:
+            self.add_item(Button(label="Next ▶️", style=discord.ButtonStyle.blurple))
+        self.add_item(Button(label="❌ Close", style=discord.ButtonStyle.red))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("You cannot control this menu.", ephemeral=True)
+            return False
+        return True
+
+    async def show_page(self, interaction: discord.Interaction):
+        start = self.current_page * self.items_per_page
+        end = start + self.items_per_page
+        page_items = self.items[start:end]
+        description = "\n".join([f"`#{item[0]}` – {item[1]}" for item in page_items])
         embed = discord.Embed(
-            title=f"Item #{item_id}",
-            description=name,
-            color=discord.Color.blue()
+            title="All Items (Admin View)",
+            description=description or "No items on this page.",
+            color=discord.Color.gold()
         )
-        if url:
-            embed.set_image(url=url)
-        embed.set_footer(text=f"Item {self.current+1} of {len(self.items)}")
+        embed.set_footer(text=f"Page {self.current_page+1} of {self.total_pages} • Total items: {len(self.items)}")
         await interaction.edit_original_response(embed=embed, view=self)
-    except Exception as e:
-        await interaction.followup.send(f"Error: {e}", ephemeral=True)
 
-@discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.blurple)
-async def prev_button(self, interaction: discord.Interaction, button: Button):
-    await interaction.response.defer()  # Acknowledge the click
-    self.current -= 1
-    self.update_buttons()
-    await self.show_current(interaction)
+    @discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.blurple)
+    async def prev_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        self.current_page -= 1
+        self.update_buttons()
+        await self.show_page(interaction)
 
-@discord.ui.button(label="Next ▶️", style=discord.ButtonStyle.blurple)
-async def next_button(self, interaction: discord.Interaction, button: Button):
-    await interaction.response.defer()
-    self.current += 1
-    self.update_buttons()
-    await self.show_current(interaction)
+    @discord.ui.button(label="Next ▶️", style=discord.ButtonStyle.blurple)
+    async def next_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        self.current_page += 1
+        self.update_buttons()
+        await self.show_page(interaction)
 
-@discord.ui.button(label="❌ Close", style=discord.ButtonStyle.red)
-async def close_button(self, interaction: discord.Interaction, button: Button):
-    await interaction.response.defer()
-    await interaction.edit_original_response(content="Closed.", embed=None, view=None)
-    self.stop()
+    @discord.ui.button(label="❌ Close", style=discord.ButtonStyle.red)
+    async def close_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        await interaction.edit_original_response(content="Closed.", embed=None, view=None)
+        self.stop()
 
+# ========== HELPER FUNCTIONS ==========
 
-# ----- Helper Functions -----
 def parse_duration(duration_str):
     pattern = re.compile(r'((?P<hours>\d+)h)?((?P<minutes>\d+)m)?')
     match = pattern.fullmatch(duration_str)
@@ -145,7 +204,8 @@ def plain_time(dt):
 def format_timestamp(dt, style="R"):
     return f"<t:{int(dt.timestamp())}:{style}>"
 
-# ----- Auction Data Class -----
+# ========== AUCTION DATA CLASS ==========
+
 class Auction:
     def __init__(self, channel, seller, item_name, start_price, min_increment, end_time, start_message, currency_symbol):
         self.channel = channel
@@ -164,7 +224,8 @@ class Auction:
         self.loop_task = None
         self.last_bid_message = None
 
-# ----- Background Auction Loop (with detailed logging) -----
+# ========== AUCTION LOOP ==========
+
 async def auction_loop(channel_id):
     await bot.wait_until_ready()
     auction = bot.auctions.get(channel_id)
@@ -182,11 +243,9 @@ async def auction_loop(channel_id):
         now = datetime.now(timezone.utc)
         time_left = (auction.end_time - now).total_seconds()
 
-        # In the last 10 seconds, print every second
         if time_left < 10:
             print(f"[LOOP] {channel_id}: time_left = {time_left:.2f}s")
         else:
-            # Otherwise print every 10 seconds
             if int(time_left) % 10 == 0:
                 print(f"[LOOP] {channel_id}: time_left = {time_left:.1f}s")
 
@@ -195,7 +254,6 @@ async def auction_loop(channel_id):
             await finalize_auction(channel_id)
             break
 
-        # 1-hour reminder
         if not auction.reminder_1h_sent and time_left <= 3600 and time_left > 3540:
             try:
                 await auction.seller.send(f"Your auction for **{auction.item_name}** ends in 1 hour!")
@@ -203,7 +261,6 @@ async def auction_loop(channel_id):
             except:
                 pass
 
-        # 5-minute reminder
         if not auction.reminder_5m_sent and time_left <= 300 and time_left > 240:
             if auction.bidders:
                 mentions = ' '.join(f"<@{uid}>" for uid in auction.bidders)
@@ -216,7 +273,6 @@ async def auction_loop(channel_id):
                     await auction.channel.send(f"⏰ **5 minutes left!** No bids yet.")
             auction.reminder_5m_sent = True
 
-        # Update original message every minute
         if int(time_left) % 60 == 0:
             try:
                 embed = discord.Embed(
@@ -235,13 +291,13 @@ async def auction_loop(channel_id):
             except:
                 pass
 
-        # Sleep 1 second in the last 10 seconds, otherwise 10 seconds
         if time_left < 10:
             await asyncio.sleep(1)
         else:
             await asyncio.sleep(10)
 
-# ----- Slash Commands -----
+# ========== SLASH COMMANDS (AUCTIONS) ==========
+
 @bot.tree.command(name="startauction", description="Start a new auction. (Requires Cryysys role)")
 @app_commands.describe(
     seller="The member who is selling the item.",
@@ -433,7 +489,8 @@ async def endauction(interaction: discord.Interaction):
     await finalize_auction(interaction.channel_id, forced=True)
     await interaction.response.send_message("Auction ended by moderator/seller.")
 
-# ----- Reaction Handler -----
+# ========== REACTION HANDLER ==========
+
 @bot.event
 async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id:
@@ -459,7 +516,8 @@ async def on_raw_reaction_add(payload):
         else:
             await message.channel.send(f"<@{payload.user_id}> will no longer receive outbid notifications.", delete_after=5)
 
-# ----- Finalize Auction -----
+# ========== FINALIZE AUCTION ==========
+
 async def finalize_auction(channel_id, forced=False):
     auction = bot.auctions.pop(channel_id, None)
     if not auction:
@@ -479,7 +537,6 @@ async def finalize_auction(channel_id, forced=False):
     winner = auction.highest_bidder
     price = auction.current_price
 
-    # Channel message
     try:
         if winner:
             embed = discord.Embed(
@@ -506,7 +563,6 @@ async def finalize_auction(channel_id, forced=False):
         except Exception as e2:
             print(f"[FINALIZE] Fallback channel message also failed: {e2}")
 
-    # DM seller
     try:
         if winner:
             await auction.seller.send(
@@ -519,6 +575,8 @@ async def finalize_auction(channel_id, forced=False):
             print("[FINALIZE] DM sent to seller (no bids)")
     except Exception as e:
         print(f"[FINALIZE] Failed to DM seller: {e}")
+
+# ========== MYSTERY CRATE COMMANDS ==========
 
 @bot.tree.command(name="additem", description="Add an item to the mystery crate pool")
 @app_commands.describe(
@@ -610,23 +668,20 @@ async def items(interaction: discord.Interaction):
         embed.set_image(url=url)
     embed.set_footer(text=f"Item 1 of {len(items)}")
     await interaction.response.send_message(embed=embed, view=view)
-    # Store the message in the view for later editing on timeout
     view.message = await interaction.original_response()
 
 @bot.tree.command(name="points", description="Check your current points")
 async def points(interaction: discord.Interaction):
     pts = database.get_points(interaction.user.id)
-    await interaction.response.send_message(f"You have **{pts}** points.", ephemeral=True)    
+    await interaction.response.send_message(f"You have **{pts}** points.", ephemeral=True)
 
 @bot.tree.command(name="draw", description="Draw a random item from the pool (costs points)")
 async def draw(interaction: discord.Interaction):
-    # Channel restriction
     if interaction.channel.name != "mystery-crates":
         await interaction.response.send_message("You can only use `/draw` in #mystery-crates.", ephemeral=True)
         return
 
-    # Get draw cost
-    cost = int(database.get_setting("draw_cost", "10"))  # default 10
+    cost = int(database.get_setting("draw_cost", "10"))
     user_id = interaction.user.id
     pts = database.get_points(user_id)
 
@@ -634,78 +689,22 @@ async def draw(interaction: discord.Interaction):
         await interaction.response.send_message(f"You need {cost} points to draw. You have {pts}.", ephemeral=True)
         return
 
-    # Atomic draw: get and remove a random item
     item = database.draw_random_item()
     if not item:
         await interaction.response.send_message("The pool is empty. Ask an admin to add items!", ephemeral=True)
         return
 
-    # Deduct points and record draw
     database.remove_points(user_id, cost)
     database.record_draw(user_id, item[0])
 
-    # Send result
-    embed = discord.Embed(title="🎁 Mystery Box", description=f"You open the mystery box and get... **{item[1]}**!", color=discord.Color.green())
+    embed = discord.Embed(
+        title="🎁 Mystery Box",
+        description=f"You open the mystery box and get... **{item[1]}**!",
+        color=discord.Color.green()
+    )
     if item[2]:
         embed.set_image(url=item[2])
     await interaction.response.send_message(embed=embed)
-
-class AdminItemListView(View):
-    def __init__(self, items, user_id):
-        super().__init__(timeout=120)
-        self.items = items  # list of (id, name, url)
-        self.user_id = user_id
-        self.current_page = 0
-        self.items_per_page = 20
-        self.total_pages = (len(items) + self.items_per_page - 1) // self.items_per_page
-        self.update_buttons()
-
-    def update_buttons(self):
-        self.clear_items()
-        if self.current_page > 0:
-            self.add_item(Button(label="◀️ Previous", style=discord.ButtonStyle.blurple, custom_id="prev"))
-        if self.current_page < self.total_pages - 1:
-            self.add_item(Button(label="Next ▶️", style=discord.ButtonStyle.blurple, custom_id="next"))
-        self.add_item(Button(label="❌ Close", style=discord.ButtonStyle.red, custom_id="close"))
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("You cannot control this menu.", ephemeral=True)
-            return False
-        return True
-
-    async def show_page(self, interaction: discord.Interaction):
-    start = self.current_page * self.items_per_page
-    end = start + self.items_per_page
-    page_items = self.items[start:end]
-    description = "\n".join([f"`#{item[0]}` – {item[1]}" for item in page_items])
-    embed = discord.Embed(
-        title="All Items (Admin View)",
-        description=description or "No items on this page.",
-        color=discord.Color.gold()
-    )
-    embed.set_footer(text=f"Page {self.current_page+1} of {self.total_pages} • Total items: {len(self.items)}")
-    await interaction.edit_original_response(embed=embed, view=self)
-
-@discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.blurple, custom_id="prev")
-async def prev_button(self, interaction: discord.Interaction, button: Button):
-    await interaction.response.defer()
-    self.current_page -= 1
-    self.update_buttons()
-    await self.show_page(interaction)
-
-@discord.ui.button(label="Next ▶️", style=discord.ButtonStyle.blurple, custom_id="next")
-async def next_button(self, interaction: discord.Interaction, button: Button):
-    await interaction.response.defer()
-    self.current_page += 1
-    self.update_buttons()
-    await self.show_page(interaction)
-
-@discord.ui.button(label="❌ Close", style=discord.ButtonStyle.red, custom_id="close")
-async def close_button(self, interaction: discord.Interaction, button: Button):
-    await interaction.response.defer()
-    await interaction.edit_original_response(content="Closed.", embed=None, view=None)
-    self.stop()
 
 @bot.tree.command(name="adminitems", description="[Admin] List all items with IDs (paginated)")
 async def adminitems(interaction: discord.Interaction):
@@ -731,13 +730,13 @@ async def adminitems(interaction: discord.Interaction):
     embed.set_footer(text=f"Page 1 of {total_pages} • Total items: {len(items)}")
     await interaction.response.send_message(embed=embed, view=view)
 
-# ----- Run Bot -----
+# ========== BOT START ==========
+
 @bot.event
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
     database.init_db()
     print("Database initialized.")
-
 
 if __name__ == "__main__":
     bot.run(TOKEN)
