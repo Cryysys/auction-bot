@@ -27,7 +27,9 @@ class AuctionBot(commands.Bot):
         await self.tree.sync()
         print(f'Synced commands for {self.user}')
 
-bot = AuctionBot()class ItemPaginationView(View):
+bot = AuctionBot()
+
+class ItemPaginationView(View):
     def __init__(self, items, user_id):
         super().__init__(timeout=120)
         self.items = items
