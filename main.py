@@ -8,6 +8,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import database
+import items_db
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -751,12 +752,122 @@ async def draw(interaction: discord.Interaction):
         embed.set_image(url=item[2])
     await interaction.response.send_message(embed=embed)
 
+# ==========ITEM DB ============
+
+@bot.tree.command(name="importitems", description="[Admin] Import game items from SQL file")
+@app_commands.describe(file="The SQL dump file")
+async def importitems(interaction: discord.Interaction, file: discord.Attachment):
+    role = discord.utils.get(interaction.guild.roles, name="Cryysys")
+    if role not in interaction.user.roles:
+        await interaction.response.send_message("You need the **Cryysys** role to import items.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    content = await file.read()
+    try:
+        sql_text = content.decode('utf-8')
+    except UnicodeDecodeError:
+        await interaction.followup.send("File must be a text SQL file.", ephemeral=True)
+        return
+
+    try:
+        count = items_db.import_raw_items(sql_text)
+        await interaction.followup.send(f"✅ Imported {count} items into database.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Import failed: {e}", ephemeral=True)
+
+@bot.tree.command(name="addgameitem", description="[Admin] Add an item to the active list by its ID")
+@app_commands.describe(item_id="The item ID from the game database")
+async def addgameitem(interaction: discord.Interaction, item_id: int):
+    role = discord.utils.get(interaction.guild.roles, name="Cryysys")
+    if role not in interaction.user.roles:
+        await interaction.response.send_message("You need the **Cryysys** role to add items.", ephemeral=True)
+        return
+
+    if items_db.add_active_item(item_id):
+        await interaction.response.send_message(f"✅ Item #{item_id} added to active list.")
+    else:
+        await interaction.response.send_message(f"❌ Item #{item_id} not found in raw database or already active.", ephemeral=True)
+
+@bot.tree.command(name="removegameitem", description="[Admin] Remove an item from the active list")
+@app_commands.describe(item_id="The item ID to remove")
+async def removegameitem(interaction: discord.Interaction, item_id: int):
+    role = discord.utils.get(interaction.guild.roles, name="Cryysys")
+    if role not in interaction.user.roles:
+        await interaction.response.send_message("You need the **Cryysys** role to remove items.", ephemeral=True)
+        return
+
+    if items_db.remove_active_item(item_id):
+        await interaction.response.send_message(f"✅ Item #{item_id} removed from active list.")
+    else:
+        await interaction.response.send_message(f"❌ Item #{item_id} not found in active list.", ephemeral=True)
+
+@bot.tree.command(name="listgameitems", description="List all active game items (paginated)")
+@app_commands.describe(page="Page number (starting from 1)")
+async def listgameitems(interaction: discord.Interaction, page: int = 1):
+    per_page = 20
+    offset = (page - 1) * per_page
+    items = items_db.get_active_items(offset, per_page)
+    total = items_db.count_active_items()
+    if not items:
+        await interaction.response.send_message("No active items yet.")
+        return
+
+    embed = discord.Embed(title="Active Game Items", color=discord.Color.green())
+    for item_id, name, type_, rarity, level in items:
+        embed.add_field(name=name, value=f"ID: {item_id} | {type_} | {rarity} | Lv.{level}", inline=False)
+    embed.set_footer(text=f"Page {page} of {(total + per_page - 1)//per_page} • {total} items")
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="searchitem", description="Search for items by name")
+@app_commands.describe(query="Item name (partial)")
+async def searchitem(interaction: discord.Interaction, query: str):
+    results = items_db.search_raw_items(query, limit=10)
+    if not results:
+        await interaction.response.send_message("No items found.", ephemeral=True)
+        return
+
+    embed = discord.Embed(title=f"Search results for '{query}'", color=discord.Color.blue())
+    for item_id, name, type_, rarity in results:
+        embed.add_field(name=name, value=f"ID: {item_id} | {type_} | {rarity}", inline=False)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="iteminfo", description="Get detailed info about an item")
+@app_commands.describe(item_id="The item ID")
+async def iteminfo(interaction: discord.Interaction, item_id: int):
+    item = items_db.get_item_details(item_id)
+    if not item:
+        await interaction.response.send_message("Item not found.", ephemeral=True)
+        return
+
+    embed = discord.Embed(title=item['name'], description=item.get('description') or "No description", color=discord.Color.gold())
+    embed.add_field(name="Type", value=item['type'], inline=True)
+    embed.add_field(name="Rarity", value=item['rarity'], inline=True)
+    embed.add_field(name="Level", value=item['level'], inline=True)
+    embed.add_field(name="Equipable", value="Yes" if item['equipable'] else "No", inline=True)
+    embed.add_field(name="Tradable", value="Yes" if item['tradable'] else "No", inline=True)
+    embed.add_field(name="Value", value=item['value'], inline=True)
+    if item.get('market_low') and item.get('market_high'):
+        embed.add_field(name="Market Low", value=item['market_low'], inline=True)
+        embed.add_field(name="Market High", value=item['market_high'], inline=True)
+    if item.get('stat1'):
+        embed.add_field(name=f"{item['stat1']} +{item['stat1modifier']}", value="", inline=True)
+    if item.get('stat2'):
+        embed.add_field(name=f"{item['stat2']} +{item['stat2modifier']}", value="", inline=True)
+    if item.get('stat3'):
+        embed.add_field(name=f"{item['stat3']} +{item['stat3modifier']}", value="", inline=True)
+    if item.get('image_url'):
+        # You may need to prepend the base URL if the image_url is relative
+        embed.set_thumbnail(url=item['image_url'])
+    await interaction.response.send_message(embed=embed)
+
 # ========== BOT START ==========
 
 @bot.event
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
     database.init_db()
+    items_db.init_db()   # <-- add this line
     print("Database initialized.")
 
 if __name__ == "__main__":
