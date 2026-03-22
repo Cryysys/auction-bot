@@ -160,24 +160,7 @@ async def auction_loop(channel_id):
                     await auction.channel.send(f"⏰ **5 minutes left!** No bids yet.")
             auction.reminder_5m_sent = True
 
-        # Update original message every minute
-        if int(time_left) % 60 == 0:
-            try:
-                embed = discord.Embed(
-                    title="Auction Started!",
-                    description=(
-                        f"**Item:** {auction.item_name}\n"
-                        f"**Seller:** {auction.seller.mention}\n"
-                        f"**Starting Price:** {format_price(auction.start_price, auction.currency_symbol)}\n"
-                        f"**Min Increment:** {format_price(auction.min_increment, auction.currency_symbol)}\n"
-                        f"**Ends:** {format_timestamp(auction.end_time, 'R')}\n"
-                        f"*(Updates every minute)*"
-                    ),
-                    color=discord.Color.green()
-                )
-                await edit_start_message(auction, embed)
-            except Exception as e:
-                print(f"Failed to update embed: {e}")
+        # Removed: original message update block
 
         if time_left < 10:
             await asyncio.sleep(1)
@@ -295,19 +278,7 @@ async def bid(interaction: discord.Interaction, amount: str):
             auction.end_time += timedelta(minutes=1)
             extended = True
 
-        embed = discord.Embed(
-            title="Auction Started!",
-            description=(
-                f"**Item:** {auction.item_name}\n"
-                f"**Seller:** {auction.seller.mention}\n"
-                f"**Starting Price:** {format_price(auction.start_price, auction.currency_symbol)}\n"
-                f"**Min Increment:** {format_price(auction.min_increment, auction.currency_symbol)}\n"
-                f"**Ends:** {format_timestamp(auction.end_time, 'R')}\n"
-                f"*(Updates every minute)*"
-            ),
-            color=discord.Color.green()
-        )
-        await edit_start_message(auction, embed)
+        # Removed the start message edit block
 
         extend_msg = "⏰ **Anti‑sniping activated!** Auction extended by 1 minute." if extended else ""
         embed_bid = discord.Embed(
