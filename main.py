@@ -153,21 +153,23 @@ async def auction_loop(channel_id):
 
         if int(time_left) % 60 == 0:
             try:
-                embed = discord.Embed(
-                    title="Auction Started!",
-                    description=(
-                        f"**Item:** {auction.item_name}\n"
-                        f"**Seller:** {auction.seller.mention}\n"
-                        f"**Starting Price:** {format_price(auction.start_price, auction.currency_symbol)}\n"
-                        f"**Min Increment:** {format_price(auction.min_increment, auction.currency_symbol)}\n"
-                        f"**Ends:** {format_timestamp(auction.end_time, 'R')}\n"
-                        f"*(Updates every minute)*"
-                    ),
-                    color=discord.Color.green()
-                )
-                await auction.start_message.edit(embed=embed)
-            except:
-                pass
+                try:
+    embed = discord.Embed(
+        title="Auction Started!",
+        description=(
+            f"**Item:** {auction.item_name}\n"
+            f"**Seller:** {auction.seller.mention}\n"
+            f"**Starting Price:** {format_price(auction.start_price, auction.currency_symbol)}\n"
+            f"**Min Increment:** {format_price(auction.min_increment, auction.currency_symbol)}\n"
+            f"**Ends:** {format_timestamp(auction.end_time, 'R')}\n"
+            f"*(Updates every minute)*"
+        ),
+        color=discord.Color.green()
+    )
+    # await auction.start_message.edit(embed=embed)   # <-- REMOVE
+    await edit_start_message(auction, embed)          # <-- ADD
+except:
+    pass
 
         if time_left < 10:
             await asyncio.sleep(1)
@@ -285,19 +287,23 @@ async def bid(interaction: discord.Interaction, amount: str):
             auction.end_time += timedelta(minutes=1)
             extended = True
 
-        embed = discord.Embed(
-            title="Auction Started!",
-            description=(
-                f"**Item:** {auction.item_name}\n"
-                f"**Seller:** {auction.seller.mention}\n"
-                f"**Starting Price:** {format_price(auction.start_price, auction.currency_symbol)}\n"
-                f"**Min Increment:** {format_price(auction.min_increment, auction.currency_symbol)}\n"
-                f"**Ends:** {format_timestamp(auction.end_time, 'R')}\n"
-                f"*(Updates every minute)*"
-            ),
-            color=discord.Color.green()
-        )
-        await auction.start_message.edit(embed=embed)
+        # Edit original auction message
+embed = discord.Embed(
+    title="Auction Started!",
+    description=(
+        f"**Item:** {auction.item_name}\n"
+        f"**Seller:** {auction.seller.mention}\n"
+        f"**Starting Price:** {format_price(auction.start_price, auction.currency_symbol)}\n"
+        f"**Min Increment:** {format_price(auction.min_increment, auction.currency_symbol)}\n"
+        f"**Ends:** {format_timestamp(auction.end_time, 'R')}\n"
+        f"*(Updates every minute)*"
+    ),
+    color=discord.Color.green()
+)
+# await auction.start_message.edit(embed=embed)   # <-- REMOVE
+await edit_start_message(auction, embed)          # <-- ADD
+except:
+    pass
 
         extend_msg = "⏰ **Anti‑sniping activated!** Auction extended by 1 minute." if extended else ""
         embed_bid = discord.Embed(
