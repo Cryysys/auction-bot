@@ -154,6 +154,7 @@ async def auction_loop(channel_id):
         if int(time_left) % 60 == 0:
             try:
                 try:
+                    
     embed = discord.Embed(
         title="Auction Started!",
         description=(
