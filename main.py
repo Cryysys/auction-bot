@@ -122,6 +122,8 @@ class Auction:
         self.end_task = None
         self.reminder_task = None
         self.last_bid_message = None
+        self.message = None      # To track the "Live Card"
+        self.image_url = None    # To store the link to the art
 
 # ========== AUCTION TIMER TASKS ==========
 
@@ -193,7 +195,8 @@ async def send_reminder_msg(auction, time_label):
     duration="Auction duration, e.g. 1h30m (max 48h).",
     item="Name of the item being sold.",
     start_price="Starting price (e.g. 100, 10M, 1.5B).",
-    min_increment="Minimum bid increment (e.g. 10, 5M)."
+    min_increment="Minimum bid increment (e.g. 10, 5M).",
+    image_url="Direct link to an image or GIF of the item (optional)." # <-- Added this
 )
 async def startauction(
     interaction: discord.Interaction,
@@ -201,7 +204,8 @@ async def startauction(
     duration: str,
     item: str,
     start_price: str,
-    min_increment: str
+    min_increment: str,
+    image_url: str = None # <-- Added this
 ):
     role = discord.utils.get(interaction.guild.roles, name="Cryysys")
     if role not in interaction.user.roles:
@@ -234,20 +238,27 @@ async def startauction(
 
     end_time = datetime.now(timezone.utc) + delta
 
+    # --- NEW EMBED LAYOUT WITH THUMBNAIL ---
     embed = discord.Embed(
-        title="Auction Started!",
+        title=f"🎨 Auction Started: {item}",
         description=(
-            f"**Item:** {item}\n"
             f"**Seller:** {seller.mention}\n"
-            f"**Starting Price:** {format_price(start_val, currency)}\n"
-            f"**Min Increment:** {format_price(min_inc_val, currency)}\n"
             f"**Ends:** {format_timestamp(end_time, 'R')}"
         ),
-        color=discord.Color.green()
+        color=discord.Color.blue()
     )
+    embed.add_field(name="Current Bid", value=format_price(start_val, currency), inline=True)
+    embed.add_field(name="Min Increment", value=format_price(min_inc_val, currency), inline=True)
+    embed.add_field(name="Highest Bidder", value="No bids yet", inline=False)
+
+    # Set the small image in the top right corner if a link was provided
+    if image_url:
+        embed.set_thumbnail(url=image_url)
+
     await interaction.response.send_message(embed=embed)
     start_message = await interaction.original_response()
 
+    # --- CREATE AUCTION OBJECT ---
     auction = Auction(
         channel=interaction.channel,
         seller=seller,
@@ -258,6 +269,11 @@ async def startauction(
         start_message=start_message,
         currency_symbol=currency
     )
+    
+    # Store the tracking variables we added to your Auction class
+    auction.message = start_message 
+    auction.image_url = image_url
+
     bot.auctions[interaction.channel_id] = auction
 
     auction.end_task = asyncio.create_task(auction_end_timer(auction))
@@ -271,86 +287,99 @@ async def bid(interaction: discord.Interaction, amount: str):
         await interaction.response.send_message("No auction is running in this channel.", ephemeral=True)
         return
 
+    if interaction.user == auction.seller:
+        await interaction.response.send_message("You cannot bid on your own auction.", ephemeral=True)
+        return
+
     bid_val, _ = parse_amount(amount)
     if bid_val is None:
         await interaction.response.send_message("Invalid bid format. Use numbers, optionally with M or B suffix.", ephemeral=True)
         return
 
-    if datetime.now(timezone.utc) >= auction.end_time:
+    now = datetime.now(timezone.utc)
+    if now >= auction.end_time:
         await interaction.response.send_message("This auction has already ended.", ephemeral=True)
         return
 
     if bid_val < auction.current_price + auction.min_increment:
         await interaction.response.send_message(
-            f"Bid must be at least **{format_price(auction.current_price + auction.min_increment, auction.currency_symbol)}** (current price + min increment).",
+            f"Bid must be at least **{format_price(auction.current_price + auction.min_increment, auction.currency_symbol)}**.",
             ephemeral=True
         )
         return
 
-    old_highest = auction.highest_bidder
+    # Defer response so we have time to edit embeds and send messages
     await interaction.response.defer()
+    old_highest = auction.highest_bidder
 
     try:
+        # 1. Update Auction State
         auction.current_price = bid_val
         auction.highest_bidder = interaction.user
         auction.bidders.add(interaction.user.id)
 
-        now = datetime.now(timezone.utc)
+        # 2. Anti-Sniping Check (No task cancelling needed with the while loop!)
         time_left = (auction.end_time - now).total_seconds()
         extended = False
         if time_left <= 120:
             auction.end_time += timedelta(minutes=1)
             extended = True
-            # Cancel old end task and start new one
-            if auction.end_task and not auction.end_task.done():
-                auction.end_task.cancel()
-            auction.end_task = asyncio.create_task(auction_end_timer(auction))
 
-        extend_msg = "⏰ **Anti‑sniping activated!** Auction extended by 1 minute." if extended else ""
-        embed_bid = discord.Embed(
-            title="New Bid!",
+        # 3. Update the "Master Message" Embed
+        master_embed = discord.Embed(
+            title=f"🎨 Auction: {auction.item_name}",
             description=(
-                f"**Item:** {auction.item_name}\n"
-                f"**Bidder:** {interaction.user.mention}\n"
-                f"**New Price:** {format_price(bid_val, auction.currency_symbol)}\n"
-                f"{extend_msg}\n\n"
-                f"🔔 Click the bell on this message to get notified if you're outbid!\n"
-                f"**Auction ends at:** {plain_time(auction.end_time)}"
+                f"**Seller:** {auction.seller.mention}\n"
+                f"**Ends:** {format_timestamp(auction.end_time, 'R')}"
             ),
             color=discord.Color.blue()
         )
-        bid_message = await interaction.followup.send(embed=embed_bid)
+        master_embed.add_field(name="Current Bid", value=format_price(auction.current_price, auction.currency_symbol), inline=True)
+        master_embed.add_field(name="Min Increment", value=format_price(auction.min_increment, auction.currency_symbol), inline=True)
+        master_embed.add_field(name="Highest Bidder", value=auction.highest_bidder.mention, inline=False)
+        
+        if auction.image_url:
+            master_embed.set_thumbnail(url=auction.image_url)
 
-        # Try to add reaction; if fails, ignore
+        if auction.message:
+            try:
+                await auction.message.edit(embed=master_embed)
+            except Exception as e:
+                print(f"Could not edit master message: {e}")
+
+        # 4. Send the Short Public Confirmation
+        extend_msg = " ⏰ *Auction extended by 1m!*" if extended else ""
+        content = (
+            f"📈 **{interaction.user.display_name}** bid **{format_price(bid_val, auction.currency_symbol)}**!{extend_msg}\n"
+            f"*(React with 🔔 to be notified if you are outbid)*"
+        )
+        bid_message = await interaction.followup.send(content=content)
+
+        # 5. Add Bell Reaction
         try:
             await bid_message.add_reaction("🔔")
             auction.last_bid_message = bid_message
         except discord.Forbidden:
-            print(f"Could not add reaction to bid message in {interaction.channel.name}")
             auction.last_bid_message = None
 
+        # 6. Notify the Outbid User
         if old_highest and old_highest != interaction.user:
             pref_key = (interaction.channel_id, old_highest.id)
             if bot.notification_prefs.get(pref_key, False):
                 try:
-                    channel_link = auction.channel.mention
                     await old_highest.send(
-                        f"You've been outbid in the auction for **{auction.item_name}** in {channel_link}!\n"
-                        f"New highest bid: {format_price(bid_val, auction.currency_symbol)} by {interaction.user.name}"
+                        f"You've been outbid for **{auction.item_name}** in {auction.channel.mention}!\n"
+                        f"New highest bid: {format_price(bid_val, auction.currency_symbol)} by {interaction.user.display_name}"
                     )
-                except:
-                    pass
+                except: pass
 
     except Exception as e:
         print(f"Error in bid command: {e}")
-        import traceback
-        traceback.print_exc()
-        await interaction.followup.send("An error occurred while processing your bid. Please try again.", ephemeral=True)
+        await interaction.followup.send("An error occurred while processing your bid.", ephemeral=True)
 
 @bot.tree.command(name="quickbid", description="Bid the minimum increment automatically.")
 async def quickbid(interaction: discord.Interaction):
     auction = bot.auctions.get(interaction.channel_id)
-    
     if not auction:
         await interaction.response.send_message("No active auction in this channel.", ephemeral=True)
         return
@@ -359,41 +388,80 @@ async def quickbid(interaction: discord.Interaction):
         await interaction.response.send_message("You cannot bid on your own auction.", ephemeral=True)
         return
 
-    # Calculate the next bid
-    new_price = auction.current_price + auction.min_increment
-    
-    # Update auction state
-    auction.current_price = new_price
-    auction.highest_bidder = interaction.user
-    auction.bidders.add(interaction.user.id)
-
-    # Anti-sniping: If bid is in last 2 minutes, extend by 1 minute
     now = datetime.now(timezone.utc)
-    time_left = (auction.end_time - now).total_seconds()
-    extended = False
-    if time_left <= 120:
-        auction.end_time += timedelta(minutes=1)
-        extended = True
-        # Restart the end timer for the new time
-        if auction.end_task:
-            auction.end_task.cancel()
-        auction.end_task = asyncio.create_task(auction_end_timer(auction))
+    if now >= auction.end_time:
+        await interaction.response.send_message("This auction has already ended.", ephemeral=True)
+        return
 
-    # Response
-    ext_msg = " **Auction extended by 1m!**" if extended else ""
-    await interaction.response.send_message(
-        f"Quick bid accepted! **{interaction.user.display_name}** is now leading with "
-        f"**{format_price(new_price, auction.currency_symbol)}**.{ext_msg}"
-    )
+    await interaction.response.defer()
+    old_highest = auction.highest_bidder
 
-    # Alert other bidders
-    for uid in auction.bidders:
-        if uid != interaction.user.id and (interaction.channel_id, uid) in bot.notification_prefs:
+    try:
+        # 1. Update Auction State with auto-calculated price
+        new_price = auction.current_price + auction.min_increment
+        auction.current_price = new_price
+        auction.highest_bidder = interaction.user
+        auction.bidders.add(interaction.user.id)
+
+        # 2. Anti-Sniping Check 
+        time_left = (auction.end_time - now).total_seconds()
+        extended = False
+        if time_left <= 120:
+            auction.end_time += timedelta(minutes=1)
+            extended = True
+
+        # 3. Update the "Master Message" Embed
+        master_embed = discord.Embed(
+            title=f"🎨 Auction: {auction.item_name}",
+            description=(
+                f"**Seller:** {auction.seller.mention}\n"
+                f"**Ends:** {format_timestamp(auction.end_time, 'R')}"
+            ),
+            color=discord.Color.blue()
+        )
+        master_embed.add_field(name="Current Bid", value=format_price(auction.current_price, auction.currency_symbol), inline=True)
+        master_embed.add_field(name="Min Increment", value=format_price(auction.min_increment, auction.currency_symbol), inline=True)
+        master_embed.add_field(name="Highest Bidder", value=auction.highest_bidder.mention, inline=False)
+        
+        if auction.image_url:
+            master_embed.set_thumbnail(url=auction.image_url)
+
+        if auction.message:
             try:
-                user = await bot.fetch_user(uid)
-                await user.send(f"You've been outbid for **{auction.item_name}**! New price: {format_price(new_price, auction.currency_symbol)}")
-            except:
-                pass
+                await auction.message.edit(embed=master_embed)
+            except Exception as e:
+                print(f"Could not edit master message: {e}")
+
+        # 4. Send the Short Public Confirmation (Matches /bid exactly)
+        extend_msg = " ⏰ *Auction extended by 1m!*" if extended else ""
+        content = (
+            f"📈 **{interaction.user.display_name}** bid **{format_price(new_price, auction.currency_symbol)}**!{extend_msg}\n"
+            f"*(React with 🔔 to be notified if you are outbid)*"
+        )
+        bid_message = await interaction.followup.send(content=content)
+
+        # 5. Add Bell Reaction
+        try:
+            await bid_message.add_reaction("🔔")
+            auction.last_bid_message = bid_message
+        except discord.Forbidden:
+            auction.last_bid_message = None
+
+        # 6. Notify the Outbid User
+        if old_highest and old_highest != interaction.user:
+            pref_key = (interaction.channel_id, old_highest.id)
+            if bot.notification_prefs.get(pref_key, False):
+                try:
+                    await old_highest.send(
+                        f"You've been outbid for **{auction.item_name}** in {auction.channel.mention}!\n"
+                        f"New highest bid: {format_price(new_price, auction.currency_symbol)} by {interaction.user.display_name}"
+                    )
+                except: pass
+
+    except Exception as e:
+        print(f"Error in quickbid command: {e}")
+        await interaction.followup.send("An error occurred while processing your bid.", ephemeral=True)
+
 
 @bot.tree.command(name="status", description="Show current auction status.")
 async def status(interaction: discord.Interaction):
@@ -494,20 +562,29 @@ async def finalize_auction(auction_or_id, forced=False):
     winner = auction.highest_bidder
     price = auction.current_price
 
-    # 3. Prepare the announcement message
+    # 3. Prepare the Final Announcement Embed
+    end_embed = discord.Embed(
+        title=f"🔨 Auction Ended: {auction.item_name}",
+        color=discord.Color.red()
+    )
+    
     if winner:
-        message = (
-            f"🎊 **Auction ended for {auction.item_name}** 🎊\n"
-            f"**Seller:** {seller.mention}\n"
+        end_embed.description = (
+            f"🎊 **Congratulations to the winner!** 🎊\n\n"
             f"**Winner:** {winner.mention}\n"
-            f"**Final amount:** {format_price(price, auction.currency_symbol)}"
+            f"**Seller:** {seller.mention}\n"
+            f"**Final Price:** {format_price(price, auction.currency_symbol)}"
         )
     else:
-        message = f"Auction for **{auction.item_name}** ended with no bids."
+        end_embed.description = f"The auction ended with no bids.\n**Seller:** {seller.mention}"
 
-    # 4. Send to the channel (using the reliable direct reference)
+    # Bring back the thumbnail so people see what was just sold
+    if auction.image_url:
+        end_embed.set_thumbnail(url=auction.image_url)
+
+    # 4. Send to the channel
     try:
-        await channel.send(message)
+        await channel.send(embed=end_embed)
     except Exception as e:
         print(f"[ERROR] Could not send end message to channel {channel.id}: {e}")
 
@@ -516,7 +593,7 @@ async def finalize_auction(auction_or_id, forced=False):
         if winner:
             await seller.send(
                 f"Your auction for **{auction.item_name}** ended.\n"
-                f"Winner: {winner} with {format_price(price, auction.currency_symbol)}."
+                f"Winner: {winner.display_name} with {format_price(price, auction.currency_symbol)}."
             )
         else:
             await seller.send(f"Your auction for **{auction.item_name}** ended with no bids.")
