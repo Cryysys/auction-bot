@@ -119,12 +119,11 @@ async def auction_loop(channel_id):
         now = datetime.now(timezone.utc)
         time_left = (auction.end_time - now).total_seconds()
 
-        # End auction if time is up
         if time_left <= 0:
             await finalize_auction(channel_id)
             break
 
-        # 1-hour reminder (only once, in channel)
+        # 1‑hour reminder (only once, in channel)
         if not auction.reminder_1h_sent and time_left <= 3600 and time_left > 3540:
             if auction.bidders:
                 mentions = ' '.join(f"<@{uid}>" for uid in auction.bidders)
@@ -137,7 +136,7 @@ async def auction_loop(channel_id):
                     await auction.channel.send(f"⏰ **1 hour left!** No bids yet.")
             auction.reminder_1h_sent = True
 
-        # 5-minute reminder (only once, in channel)
+        # 5‑minute reminder (only once, in channel)
         if not auction.reminder_5m_sent and time_left <= 300 and time_left > 240:
             if auction.bidders:
                 mentions = ' '.join(f"<@{uid}>" for uid in auction.bidders)
@@ -174,13 +173,29 @@ async def startauction(
     start_price: str,
     min_increment: str
 ):
+    # Role check
     role = discord.utils.get(interaction.guild.roles, name="Cryysys")
     if role not in interaction.user.roles:
         await interaction.response.send_message("You need the **Cryysys** role to start an auction.", ephemeral=True)
         return
 
+    # Check if auction already exists in this channel
     if interaction.channel_id in bot.auctions:
         await interaction.response.send_message("An auction is already running in this channel!", ephemeral=True)
+        return
+
+    # Check bot permissions in the channel
+    perms = interaction.channel.permissions_for(interaction.guild.me)
+    missing = []
+    if not perms.send_messages:
+        missing.append("Send Messages")
+    if not perms.add_reactions:
+        missing.append("Add Reactions")
+    if missing:
+        await interaction.response.send_message(
+            f"I need the following permissions in this channel: {', '.join(missing)}.\nPlease grant them and try again.",
+            ephemeral=True
+        )
         return
 
     delta = parse_duration(duration)
@@ -266,7 +281,6 @@ async def bid(interaction: discord.Interaction, amount: str):
             auction.end_time += timedelta(minutes=1)
             extended = True
 
-        # No start message edit – only send bid confirmation
         extend_msg = "⏰ **Anti‑sniping activated!** Auction extended by 1 minute." if extended else ""
         embed_bid = discord.Embed(
             title="New Bid!",
@@ -282,9 +296,16 @@ async def bid(interaction: discord.Interaction, amount: str):
         )
         bid_message = await interaction.followup.send(embed=embed_bid)
 
-        await bid_message.add_reaction("🔔")
-        auction.last_bid_message = bid_message
+        # Try to add reaction; if fails, log but don't show error to user
+        try:
+            await bid_message.add_reaction("🔔")
+            auction.last_bid_message = bid_message
+        except discord.Forbidden:
+            print(f"Could not add reaction to bid message in {interaction.channel.name} – missing Add Reactions permission")
+            # We still set last_bid_message to None so reactions are ignored
+            auction.last_bid_message = None
 
+        # Outbid notification
         if old_highest and old_highest != interaction.user:
             pref_key = (interaction.channel_id, old_highest.id)
             if bot.notification_prefs.get(pref_key, False):
@@ -333,7 +354,6 @@ async def endauction(interaction: discord.Interaction):
         await interaction.response.send_message("Only the seller or an admin can force-end the auction.", ephemeral=True)
         return
 
-    # Cancel the loop task before finalizing
     if auction.loop_task and not auction.loop_task.done():
         auction.loop_task.cancel()
 
@@ -361,11 +381,14 @@ async def on_raw_reaction_add(payload):
 
     channel = bot.get_channel(payload.channel_id)
     if channel:
-        message = await channel.fetch_message(payload.message_id)
-        if not current:
-            await message.channel.send(f"<@{payload.user_id}> will now be DM'd if outbid!", delete_after=5)
-        else:
-            await message.channel.send(f"<@{payload.user_id}> will no longer receive outbid notifications.", delete_after=5)
+        try:
+            message = await channel.fetch_message(payload.message_id)
+            if not current:
+                await message.channel.send(f"<@{payload.user_id}> will now be DM'd if outbid!", delete_after=5)
+            else:
+                await message.channel.send(f"<@{payload.user_id}> will no longer receive outbid notifications.", delete_after=5)
+        except discord.Forbidden:
+            pass  # Ignore if we can't send message (missing perms)
 
 # ========== FINALIZE AUCTION ==========
 
@@ -382,7 +405,6 @@ async def finalize_auction(channel_id, forced=False):
     for key in keys_to_remove:
         del bot.notification_prefs[key]
 
-    # Cancel loop task if still running
     if auction.loop_task and not auction.loop_task.done():
         auction.loop_task.cancel()
 
@@ -390,7 +412,7 @@ async def finalize_auction(channel_id, forced=False):
     winner = auction.highest_bidder
     price = auction.current_price
 
-    # Send channel message (plain text)
+    # Send channel message
     try:
         if winner:
             message = (
