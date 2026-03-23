@@ -46,29 +46,37 @@ def parse_duration(duration_str):
 def parse_amount(amount_str):
     original = amount_str.strip()
     amount_str = original.upper()
-    currency = ''
-    if original.startswith('€'):
-        currency = '€'
-    elif original.startswith('$'):
-        currency = '$'
-    amount_str = amount_str.replace('€', '').replace('$', '')
+    # Remove currency symbols for now (disable €/$)
+    # amount_str = amount_str.replace('€', '').replace('$', '')
     multiplier = 1
-    if amount_str.endswith('M') or amount_str.endswith('MIL') or amount_str.endswith('MILLION'):
+    # Check for billion suffix
+    if amount_str.endswith('B'):
+        amount_str = amount_str[:-1]
+        multiplier = 1_000_000_000
+    elif amount_str.endswith('M') or amount_str.endswith('MIL') or amount_str.endswith('MILLION'):
         amount_str = re.sub(r'(M|MIL|MILLION)$', '', amount_str)
         multiplier = 1_000_000
+    # Allow decimal numbers
     try:
-        value = int(amount_str)
-        return value * multiplier, currency
+        value = float(amount_str)
+        return int(value * multiplier), ''  # return currency as empty string
     except ValueError:
         return None, None
 
 def format_number(num):
     if num >= 1_000_000_000:
-        return f"{num/1_000_000_000:.1f}B".rstrip('0').rstrip('.')
+        val = num / 1_000_000_000
+        # Show up to 3 decimals, strip trailing zeros
+        formatted = f"{val:.3f}".rstrip('0').rstrip('.')
+        return f"{formatted}B"
     elif num >= 1_000_000:
-        return f"{num/1_000_000:.1f}M".rstrip('0').rstrip('.')
+        val = num / 1_000_000
+        formatted = f"{val:.2f}".rstrip('0').rstrip('.')
+        return f"{formatted}M"
     elif num >= 1_000:
-        return f"{num/1_000:.1f}K".rstrip('0').rstrip('.')
+        val = num / 1_000
+        formatted = f"{val:.1f}".rstrip('0').rstrip('.')
+        return f"{formatted}K"
     else:
         return str(num)
 
@@ -80,14 +88,6 @@ def plain_time(dt):
 
 def format_timestamp(dt, style="R"):
     return f"<t:{int(dt.timestamp())}:{style}>"
-
-async def edit_start_message(auction, embed):
-    """Fetch the current start message and edit it. Avoids webhook token issues."""
-    try:
-        msg = await auction.channel.fetch_message(auction.start_message.id)
-        await msg.edit(embed=embed)
-    except (discord.NotFound, discord.Forbidden) as e:
-        print(f"Failed to edit start message: {e}")
 
 # ========== AUCTION DATA CLASS ==========
 
@@ -140,12 +140,17 @@ async def auction_loop(channel_id):
             break
 
         # 1-hour reminder
-        if not auction.reminder_1h_sent and time_left <= 3600 and time_left > 3540:
-            try:
-                await auction.seller.send(f"Your auction for **{auction.item_name}** ends in 1 hour!")
-                auction.reminder_1h_sent = True
-            except:
-                pass
+if not auction.reminder_1h_sent and time_left <= 3600 and time_left > 3540:
+    if auction.bidders:
+        mentions = ' '.join(f"<@{uid}>" for uid in auction.bidders)
+        await auction.channel.send(f"⏰ **1 hour left!** {mentions} final bids!")
+    else:
+        role = discord.utils.get(auction.channel.guild.roles, name="Auction Lover")
+        if role:
+            await auction.channel.send(f"⏰ **1 hour left!** {role.mention} no bids yet!")
+        else:
+            await auction.channel.send(f"⏰ **1 hour left!** No bids yet.")
+    auction.reminder_1h_sent = True
 
         # 5-minute reminder
         if not auction.reminder_5m_sent and time_left <= 300 and time_left > 240:
@@ -396,19 +401,17 @@ async def finalize_auction(channel_id, forced=False):
     winner = auction.highest_bidder
     price = auction.current_price
 
+    # Channel message (plain text, not embed)
     try:
         if winner:
-            embed = discord.Embed(
-                title="Auction Ended!",
-                description=(
-                    f"**Item:** {auction.item_name}\n"
-                    f"**Winner:** {winner.mention}\n"
-                    f"**Final Price:** {format_price(price, auction.currency_symbol)}"
-                ),
-                color=discord.Color.gold()
+            message = (
+                f"**Auction ended for {auction.item_name}**\n"
+                f"Seller: {auction.seller.mention}\n"
+                f"Winner: {winner.mention}\n"
+                f"Final amount: {format_price(price, auction.currency_symbol)}"
             )
-            await channel.send(embed=embed)
-            print(f"[FINALIZE] Channel embed sent for winner {winner}")
+            await channel.send(message)
+            print(f"[FINALIZE] Channel message sent for winner {winner}")
         else:
             await channel.send(f"Auction for **{auction.item_name}** ended with no bids.")
             print("[FINALIZE] Channel message sent (no bids)")
@@ -416,12 +419,14 @@ async def finalize_auction(channel_id, forced=False):
         print(f"[FINALIZE] Failed to send channel message: {e}")
         try:
             if winner:
-                await channel.send(f"**Auction Ended!**\nItem: {auction.item_name}\nWinner: {winner.mention}\nFinal Price: {format_price(price, auction.currency_symbol)}")
+                # Fallback: even simpler
+                await channel.send(f"**Auction ended for {auction.item_name}**\nSeller: {auction.seller.mention}\nWinner: {winner.mention}\nFinal amount: {format_price(price, auction.currency_symbol)}")
             else:
                 await channel.send(f"Auction for **{auction.item_name}** ended with no bids.")
         except Exception as e2:
             print(f"[FINALIZE] Fallback channel message also failed: {e2}")
 
+    # Seller DM (unchanged)
     try:
         if winner:
             await auction.seller.send(
