@@ -400,9 +400,16 @@ async def finalize_auction(channel_id, forced=False):
     if auction.loop_task and not auction.loop_task.done():
         auction.loop_task.cancel()
 
-    channel = auction.channel
+    # Get a fresh channel reference
+    channel = bot.get_channel(channel_id)
+    if channel is None:
+        print(f"[FINALIZE] Could not get channel {channel_id}")
+        return
+
     winner = auction.highest_bidder
     price = auction.current_price
+
+    print(f"[FINALIZE] Preparing to send channel message. Winner: {winner}, Price: {price}")
 
     # Send channel message
     try:
@@ -434,6 +441,7 @@ async def finalize_auction(channel_id, forced=False):
             print("[FINALIZE] DM sent to seller (no bids)")
     except Exception as e:
         print(f"[FINALIZE] Failed to DM seller: {e}")
+
 
 # ========== MYSTERY CRATE DROPDOWN VIEW ==========
 
