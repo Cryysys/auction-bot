@@ -214,17 +214,16 @@ async def startauction(
     end_time = datetime.now(timezone.utc) + delta
 
     embed = discord.Embed(
-        title="Auction Started!",
-        description=(
-            f"**Item:** {item}\n"
-            f"**Seller:** {seller.mention}\n"
-            f"**Starting Price:** {format_price(start_val, currency)}\n"
-            f"**Min Increment:** {format_price(min_inc_val, currency)}\n"
-            f"**Ends:** {format_timestamp(end_time, 'R')}\n"
-            f"*(Updates every minute)*"
-        ),
-        color=discord.Color.green()
-    )
+    title="Auction Started!",
+    description=(
+        f"**Item:** {item}\n"
+        f"**Seller:** {seller.mention}\n"
+        f"**Starting Price:** {format_price(start_val, currency)}\n"
+        f"**Min Increment:** {format_price(min_inc_val, currency)}\n"
+        f"**Ends:** {format_timestamp(end_time, 'R')}"
+    ),
+    color=discord.Color.green()
+)
     await interaction.response.send_message(embed=embed)
     start_message = await interaction.original_response()
 
@@ -287,6 +286,7 @@ async def bid(interaction: discord.Interaction, amount: str):
         embed_bid = discord.Embed(
             title="New Bid!",
             description=(
+                f"**Item:** {auction.item_name}\n"
                 f"**Bidder:** {interaction.user.mention}\n"
                 f"**New Price:** {format_price(bid_val, auction.currency_symbol)}\n"
                 f"{extend_msg}\n\n"
@@ -388,10 +388,12 @@ async def finalize_auction(channel_id, forced=False):
 
     print(f"[FINALIZE] Auction ended in {channel_id} - Item: {auction.item_name}")
 
+    # Clean up notification preferences
     keys_to_remove = [k for k in bot.notification_prefs.keys() if k[0] == channel_id]
     for key in keys_to_remove:
         del bot.notification_prefs[key]
 
+    # Cancel loop task if still running
     if auction.loop_task and not auction.loop_task.done():
         auction.loop_task.cancel()
 
@@ -399,7 +401,7 @@ async def finalize_auction(channel_id, forced=False):
     winner = auction.highest_bidder
     price = auction.current_price
 
-    # Channel message (plain text, not embed)
+    # Send channel message
     try:
         if winner:
             message = (
@@ -415,16 +417,8 @@ async def finalize_auction(channel_id, forced=False):
             print("[FINALIZE] Channel message sent (no bids)")
     except Exception as e:
         print(f"[FINALIZE] Failed to send channel message: {e}")
-        try:
-            if winner:
-                # Fallback: even simpler
-                await channel.send(f"**Auction ended for {auction.item_name}**\nSeller: {auction.seller.mention}\nWinner: {winner.mention}\nFinal amount: {format_price(price, auction.currency_symbol)}")
-            else:
-                await channel.send(f"Auction for **{auction.item_name}** ended with no bids.")
-        except Exception as e2:
-            print(f"[FINALIZE] Fallback channel message also failed: {e2}")
 
-    # Seller DM (unchanged)
+    # Send seller DM
     try:
         if winner:
             await auction.seller.send(
