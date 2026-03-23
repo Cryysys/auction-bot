@@ -127,54 +127,63 @@ class Auction:
 
 async def auction_end_timer(auction):
     """Wait until the end time and finalize."""
-    now = datetime.now(timezone.utc)
-    wait_seconds = (auction.end_time - now).total_seconds()
-    if wait_seconds > 0:
-        await asyncio.sleep(wait_seconds)
-    # Finalize if auction still exists
-    if auction.channel.id in bot.auctions:
-        await finalize_auction(auction.channel.id)
+    try:
+        # We loop and check every 5 seconds so we can react to extensions
+        while auction.channel.id in bot.auctions:
+            now = datetime.now(timezone.utc)
+            wait_seconds = (auction.end_time - now).total_seconds()
+            
+            if wait_seconds <= 0:
+                # Time is up!
+                await finalize_auction(auction) # Use the object-based fix from before
+                break
+            
+            # Sleep in small increments so we stay responsive to bids
+            await asyncio.sleep(min(wait_seconds, 5)) 
+    except asyncio.CancelledError:
+        pass
 
 async def auction_reminders(auction):
-    """Send 1-hour and 5-minute reminders."""
-    now = datetime.now(timezone.utc)
-    end = auction.end_time
+    """Accurately send 1-hour and 5-minute reminders by checking every 30s."""
+    try:
+        while auction.channel.id in bot.auctions:
+            now = datetime.now(timezone.utc)
+            remaining = (auction.end_time - now).total_seconds()
 
-    # 1-hour reminder
-    one_hour = end - timedelta(hours=1)
-    if now < one_hour:
-        wait_1h = (one_hour - now).total_seconds()
-        if wait_1h > 0:
-            await asyncio.sleep(wait_1h)
-        if auction.channel.id in bot.auctions and not auction.reminder_1h_sent:
-            if auction.bidders:
-                mentions = ' '.join(f"<@{uid}>" for uid in auction.bidders)
-                await auction.channel.send(f"⏰ **1 hour left!** {mentions} final bids!")
-            else:
-                role = discord.utils.get(auction.channel.guild.roles, name="Auction Lover")
-                if role:
-                    await auction.channel.send(f"⏰ **1 hour left!** {role.mention} no bids yet!")
-                else:
-                    await auction.channel.send(f"⏰ **1 hour left!** No bids yet.")
-            auction.reminder_1h_sent = True
+            # 1-hour reminder (3600 seconds)
+            if 3540 <= remaining <= 3600 and not auction.reminder_1h_sent:
+                await send_reminder_msg(auction, "1 hour")
+                auction.reminder_1h_sent = True
 
-    # 5-minute reminder
-    five_min = end - timedelta(minutes=5)
-    if now < five_min:
-        wait_5m = (five_min - now).total_seconds()
-        if wait_5m > 0:
-            await asyncio.sleep(wait_5m)
-        if auction.channel.id in bot.auctions and not auction.reminder_5m_sent:
-            if auction.bidders:
-                mentions = ' '.join(f"<@{uid}>" for uid in auction.bidders)
-                await auction.channel.send(f"⏰ **5 minutes left!** {mentions} final bids!")
-            else:
-                role = discord.utils.get(auction.channel.guild.roles, name="Auction Lover")
-                if role:
-                    await auction.channel.send(f"⏰ **5 minutes left!** {role.mention} no bids yet!")
-                else:
-                    await auction.channel.send(f"⏰ **5 minutes left!** No bids yet.")
-            auction.reminder_5m_sent = True
+            # 5-minute reminder (300 seconds)
+            if 270 <= remaining <= 300 and not auction.reminder_5m_sent:
+                await send_reminder_msg(auction, "5 minutes")
+                auction.reminder_5m_sent = True
+            
+            # CRITICAL FIX: If a bid extends the auction, reset the sent flags 
+            # so the reminder can fire again at the NEW correct time
+            if remaining > 3610:
+                auction.reminder_1h_sent = False
+            if remaining > 310:
+                auction.reminder_5m_sent = False
+
+            if remaining <= 0:
+                break
+                
+            await asyncio.sleep(30) # Check the clock every 30 seconds
+    except asyncio.CancelledError:
+        pass
+
+async def send_reminder_msg(auction, time_label):
+    """Helper to handle the logic of who to ping."""
+    if auction.bidders:
+        mentions = ' '.join(f"<@{uid}>" for uid in auction.bidders)
+        await auction.channel.send(f"⏰ **{time_label} left!** {mentions} final bids!")
+    else:
+        role = discord.utils.get(auction.channel.guild.roles, name="Auction Lover")
+        mention = role.mention if role else "No bids yet."
+        await auction.channel.send(f"⏰ **{time_label} left!** {mention}")
+
 
 # ========== SLASH COMMANDS (AUCTIONS) ==========
 
@@ -337,6 +346,54 @@ async def bid(interaction: discord.Interaction, amount: str):
         import traceback
         traceback.print_exc()
         await interaction.followup.send("An error occurred while processing your bid. Please try again.", ephemeral=True)
+
+@bot.tree.command(name="quickbid", description="Bid the minimum increment automatically.")
+async def quickbid(interaction: discord.Interaction):
+    auction = bot.auctions.get(interaction.channel_id)
+    
+    if not auction:
+        await interaction.response.send_message("No active auction in this channel.", ephemeral=True)
+        return
+
+    if interaction.user == auction.seller:
+        await interaction.response.send_message("You cannot bid on your own auction.", ephemeral=True)
+        return
+
+    # Calculate the next bid
+    new_price = auction.current_price + auction.min_increment
+    
+    # Update auction state
+    auction.current_price = new_price
+    auction.highest_bidder = interaction.user
+    auction.bidders.add(interaction.user.id)
+
+    # Anti-sniping: If bid is in last 2 minutes, extend by 1 minute
+    now = datetime.now(timezone.utc)
+    time_left = (auction.end_time - now).total_seconds()
+    extended = False
+    if time_left <= 120:
+        auction.end_time += timedelta(minutes=1)
+        extended = True
+        # Restart the end timer for the new time
+        if auction.end_task:
+            auction.end_task.cancel()
+        auction.end_task = asyncio.create_task(auction_end_timer(auction))
+
+    # Response
+    ext_msg = " **Auction extended by 1m!**" if extended else ""
+    await interaction.response.send_message(
+        f"Quick bid accepted! **{interaction.user.display_name}** is now leading with "
+        f"**{format_price(new_price, auction.currency_symbol)}**.{ext_msg}"
+    )
+
+    # Alert other bidders
+    for uid in auction.bidders:
+        if uid != interaction.user.id and (interaction.channel_id, uid) in bot.notification_prefs:
+            try:
+                user = await bot.fetch_user(uid)
+                await user.send(f"You've been outbid for **{auction.item_name}**! New price: {format_price(new_price, auction.currency_symbol)}")
+            except:
+                pass
 
 @bot.tree.command(name="status", description="Show current auction status.")
 async def status(interaction: discord.Interaction):
