@@ -1,16 +1,21 @@
 import sqlite3
 import os
 
-DB_PATH = os.getenv('ITEMS_DB_PATH', 'items.db')  # separate environment variable for Railway
+DB_PATH = os.getenv(
+    "ITEMS_DB_PATH", "items.db"
+)  # separate environment variable for Railway
+
 
 def get_connection():
     return sqlite3.connect(DB_PATH, check_same_thread=False)
+
 
 def init_db():
     conn = get_connection()
     c = conn.cursor()
     # raw_items table – structure as per the game's data
-    c.execute('''
+    c.execute(
+        """
         CREATE TABLE IF NOT EXISTS raw_items (
             id INTEGER PRIMARY KEY,
             type TEXT,
@@ -33,40 +38,52 @@ def init_db():
             market_low INTEGER,
             market_high INTEGER
         )
-    ''')
+    """
+    )
     # active items (just links to raw_items)
-    c.execute('''
+    c.execute(
+        """
         CREATE TABLE IF NOT EXISTS active_items (
             raw_item_id INTEGER PRIMARY KEY,
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(raw_item_id) REFERENCES raw_items(id)
         )
-    ''')
+    """
+    )
     # full‑text search virtual table
-    c.execute('''
+    c.execute(
+        """
         CREATE VIRTUAL TABLE IF NOT EXISTS fts_raw USING fts5(
             name, content=raw_items, content_rowid=id
         )
-    ''')
+    """
+    )
     # triggers to keep fts in sync with raw_items
-    c.execute('''
+    c.execute(
+        """
         CREATE TRIGGER IF NOT EXISTS raw_items_ai AFTER INSERT ON raw_items BEGIN
             INSERT INTO fts_raw(rowid, name) VALUES (new.id, new.name);
         END
-    ''')
-    c.execute('''
+    """
+    )
+    c.execute(
+        """
         CREATE TRIGGER IF NOT EXISTS raw_items_ad AFTER DELETE ON raw_items BEGIN
             INSERT INTO fts_raw(fts_raw, rowid, name) VALUES ('delete', old.id, old.name);
         END
-    ''')
-    c.execute('''
+    """
+    )
+    c.execute(
+        """
         CREATE TRIGGER IF NOT EXISTS raw_items_au AFTER UPDATE ON raw_items BEGIN
             INSERT INTO fts_raw(fts_raw, rowid, name) VALUES ('delete', old.id, old.name);
             INSERT INTO fts_raw(rowid, name) VALUES (new.id, new.name);
         END
-    ''')
+    """
+    )
     conn.commit()
     conn.close()
+
 
 def import_raw_items(sql_text):
     """
@@ -75,9 +92,10 @@ def import_raw_items(sql_text):
     We'll rename that table to 'raw_items' during import.
     """
     import re
+
     # Replace table name 'items' with 'raw_items' (case‑insensitive word boundaries)
     # Be careful to not replace inside strings – but the dump likely uses the table name as an identifier.
-    modified_sql = re.sub(r'\bitems\b', 'raw_items', sql_text, flags=re.IGNORECASE)
+    modified_sql = re.sub(r"\bitems\b", "raw_items", sql_text, flags=re.IGNORECASE)
     conn = get_connection()
     c = conn.cursor()
     # Begin transaction
@@ -96,6 +114,7 @@ def import_raw_items(sql_text):
     finally:
         conn.close()
 
+
 def add_active_item(raw_id):
     conn = get_connection()
     c = conn.cursor()
@@ -103,6 +122,7 @@ def add_active_item(raw_id):
     conn.commit()
     conn.close()
     return c.rowcount > 0
+
 
 def remove_active_item(raw_id):
     conn = get_connection()
@@ -112,19 +132,24 @@ def remove_active_item(raw_id):
     conn.close()
     return c.rowcount > 0
 
+
 def get_active_items(offset=0, limit=20):
     conn = get_connection()
     c = conn.cursor()
-    c.execute('''
+    c.execute(
+        """
         SELECT r.id, r.name, r.type, r.rarity, r.level
         FROM raw_items r
         JOIN active_items a ON r.id = a.raw_item_id
         ORDER BY r.name
         LIMIT ? OFFSET ?
-    ''', (limit, offset))
+    """,
+        (limit, offset),
+    )
     rows = c.fetchall()
     conn.close()
     return rows
+
 
 def count_active_items():
     conn = get_connection()
@@ -134,21 +159,26 @@ def count_active_items():
     conn.close()
     return count
 
+
 def search_raw_items(query, limit=10):
     conn = get_connection()
     c = conn.cursor()
     # Use FTS for fast search
-    c.execute('''
+    c.execute(
+        """
         SELECT r.id, r.name, r.type, r.rarity
         FROM raw_items r
         JOIN fts_raw f ON r.id = f.rowid
         WHERE f.name MATCH ?
         ORDER BY rank
         LIMIT ?
-    ''', (query, limit))
+    """,
+        (query, limit),
+    )
     rows = c.fetchall()
     conn.close()
     return rows
+
 
 def get_item_details(item_id):
     conn = get_connection()
