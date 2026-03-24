@@ -1,14 +1,24 @@
 import discord
-from discord.ext import commands
 from discord import app_commands
-from discord.ui import View, Button, Select
 import asyncio
 import os
-import re
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import database
-import traceback  # Add this at the top of main.py
+
+
+from src.Auction import Auction
+from src.AuctionBot import AuctionBot
+from src.ItemDropdownView import ItemDropdownView
+from src.auctionFunctions.finalize_auction import finalize_auction
+from src.auctionFunctions.auction_end_timer import auction_end_timer
+from src.helperFunctions.formatting_helpers import (
+    format_price,
+    format_timestamp,
+    plain_time,
+)
+from src.helperFunctions.parse_amount import parse_amount
+from src.helperFunctions.parse_duration import parse_duration
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -18,202 +28,7 @@ intents.message_content = True
 intents.members = True
 intents.reactions = True
 
-
-async def auction_end_timer(auction):
-    """Wait until the end time and finalize."""
-    try:
-        now = datetime.now(timezone.utc)
-        wait_seconds = (auction.end_time - now).total_seconds()
-
-        if wait_seconds > 0:
-            await asyncio.sleep(wait_seconds)
-
-        # Check if the auction was already ended or replaced
-        if auction.channel.id in bot.auctions:
-            # IMPORTANT: Pass the auction OBJECT, not just the ID
-            await finalize_auction(auction)
-    except Exception as e:
-        print(f"!!! CRITICAL ERROR IN TIMER for {auction.item_name} !!!")
-        traceback.print_exc()
-
-
-class AuctionBot(commands.Bot):
-    def __init__(self):
-        super().__init__(command_prefix="!", intents=intents)
-        self.auctions = {}
-        self.notification_prefs = {}
-        self.active_views = []
-
-    async def setup_hook(self):
-        await self.tree.sync()
-        print(f"Synced commands for {self.user}")
-
-
-bot = AuctionBot()
-
-# ========== HELPER FUNCTIONS ==========
-
-
-def parse_duration(duration_str):
-    pattern = re.compile(r"((?P<hours>\d+)h)?((?P<minutes>\d+)m)?")
-    match = pattern.fullmatch(duration_str)
-    if not match:
-        return None
-    hours = int(match.group("hours")) if match.group("hours") else 0
-    minutes = int(match.group("minutes")) if match.group("minutes") else 0
-    if hours == 0 and minutes == 0:
-        return None
-    return timedelta(hours=hours, minutes=minutes)
-
-
-def parse_amount(amount_str):
-    original = amount_str.strip()
-    amount_str = original.upper()
-    multiplier = 1
-    if amount_str.endswith("B"):
-        amount_str = amount_str[:-1]
-        multiplier = 1_000_000_000
-    elif (
-        amount_str.endswith("M")
-        or amount_str.endswith("MIL")
-        or amount_str.endswith("MILLION")
-    ):
-        amount_str = re.sub(r"(M|MIL|MILLION)$", "", amount_str)
-        multiplier = 1_000_000
-    try:
-        value = float(amount_str)
-        return int(value * multiplier), ""
-    except ValueError:
-        return None, None
-
-
-def format_number(num):
-    if num >= 1_000_000_000:
-        val = num / 1_000_000_000
-        formatted = f"{val:.3f}".rstrip("0").rstrip(".")
-        return f"{formatted}B"
-    elif num >= 1_000_000:
-        val = num / 1_000_000
-        formatted = f"{val:.2f}".rstrip("0").rstrip(".")
-        return f"{formatted}M"
-    elif num >= 1_000:
-        val = num / 1_000
-        formatted = f"{val:.1f}".rstrip("0").rstrip(".")
-        return f"{formatted}K"
-    else:
-        return str(num)
-
-
-def format_price(amount, currency):
-    return f"{format_number(amount)}"
-
-
-def plain_time(dt):
-    return dt.strftime("%H:%M UTC")
-
-
-def format_timestamp(dt, style="f"):
-    return f"<t:{int(dt.timestamp())}:{style}>"
-
-
-# ========== AUCTION DATA CLASS ==========
-
-
-class Auction:
-    def __init__(
-        self,
-        channel,
-        seller,
-        item_name,
-        start_price,
-        min_increment,
-        end_time,
-        start_message,
-        currency_symbol,
-    ):
-        self.channel = channel
-        self.seller = seller
-        self.item_name = item_name
-        self.start_price = start_price
-        self.min_increment = min_increment
-        self.current_price = start_price
-        self.end_time = end_time
-        self.highest_bidder = None
-        self.bidders = set()
-        self.start_message = start_message
-        self.currency_symbol = currency_symbol
-        self.reminder_1h_sent = False
-        self.reminder_5m_sent = False
-        self.end_task = None
-        self.reminder_task = None
-        self.last_bid_message = None
-        self.message = None  # To track the "Live Card"
-        self.image_url = None  # To store the link to the art
-
-
-# ========== AUCTION TIMER TASKS ==========
-
-
-async def auction_end_timer(auction):
-    """Wait until the end time and finalize."""
-    try:
-        # We loop and check every 5 seconds so we can react to extensions
-        while auction.channel.id in bot.auctions:
-            now = datetime.now(timezone.utc)
-            wait_seconds = (auction.end_time - now).total_seconds()
-
-            if wait_seconds <= 0:
-                # Time is up!
-                await finalize_auction(auction)  # Use the object-based fix from before
-                break
-
-            # Sleep in small increments so we stay responsive to bids
-            await asyncio.sleep(min(wait_seconds, 5))
-    except asyncio.CancelledError:
-        pass
-
-
-async def auction_reminders(auction):
-    """Accurately send 1-hour and 5-minute reminders by checking every 30s."""
-    try:
-        while auction.channel.id in bot.auctions:
-            now = datetime.now(timezone.utc)
-            remaining = (auction.end_time - now).total_seconds()
-
-            # 1-hour reminder (3600 seconds)
-            if 3540 <= remaining <= 3600 and not auction.reminder_1h_sent:
-                await send_reminder_msg(auction, "1 hour")
-                auction.reminder_1h_sent = True
-
-            # 5-minute reminder (300 seconds)
-            if 270 <= remaining <= 300 and not auction.reminder_5m_sent:
-                await send_reminder_msg(auction, "5 minutes")
-                auction.reminder_5m_sent = True
-
-            # CRITICAL FIX: If a bid extends the auction, reset the sent flags
-            # so the reminder can fire again at the NEW correct time
-            if remaining > 3610:
-                auction.reminder_1h_sent = False
-            if remaining > 310:
-                auction.reminder_5m_sent = False
-
-            if remaining <= 0:
-                break
-
-            await asyncio.sleep(30)  # Check the clock every 30 seconds
-    except asyncio.CancelledError:
-        pass
-
-
-async def send_reminder_msg(auction, time_label):
-    """Helper to handle the logic of who to ping."""
-    if auction.bidders:
-        mentions = " ".join(f"<@{uid}>" for uid in auction.bidders)
-        await auction.channel.send(f"⏰ **{time_label} left!** {mentions} final bids!")
-    else:
-        role = discord.utils.get(auction.channel.guild.roles, name="Auction Lover")
-        mention = role.mention if role else "No bids yet."
-        await auction.channel.send(f"⏰ **{time_label} left!** {mention}")
+bot = AuctionBot(intents)
 
 
 # ========== SLASH COMMANDS (AUCTIONS) ==========
@@ -326,7 +141,7 @@ async def startauction(
 
     bot.auctions[interaction.channel_id] = auction
 
-    auction.end_task = asyncio.create_task(auction_end_timer(auction))
+    auction.end_task = asyncio.create_task(auction_end_timer(bot, auction))
     auction.reminder_task = asyncio.create_task(auction_reminders(auction))
 
 
@@ -618,7 +433,7 @@ async def endauction(interaction: discord.Interaction):
         auction.reminder_task.cancel()
 
     # We pass the WHOLE auction object, ensuring we have the direct channel reference
-    await finalize_auction(auction, forced=True)
+    await finalize_auction(bot, auction, forced=True)
 
     # Simple confirmation for the user who ran the command
     await interaction.response.send_message("Auction ended by moderator/seller.")
@@ -662,124 +477,6 @@ async def on_raw_reaction_add(payload):
                 )
         except:
             pass
-
-
-# ========== FINALIZE AUCTION ==========
-
-
-async def finalize_auction(auction_or_id, forced=False):
-    """
-    Finalizes the auction.
-    Accepts either an Auction object (preferred) or a channel ID (for fallback).
-    """
-    # 1. Determine if we were given an object or an ID
-    if isinstance(auction_or_id, int):
-        auction = bot.auctions.pop(auction_or_id, None)
-    else:
-        auction = auction_or_id
-        # Remove it from the dictionary so no more bids can be placed
-        bot.auctions.pop(auction.channel.id, None)
-
-    if not auction:
-        return
-
-    # 2. Use the direct references saved in the Auction object
-    channel = auction.channel
-    seller = auction.seller
-    winner = auction.highest_bidder
-    price = auction.current_price
-
-    # 3. Prepare the Final Announcement Embed
-    end_embed = discord.Embed(
-        title=f"🔨 Auction Ended: {auction.item_name}", color=discord.Color.red()
-    )
-
-    if winner:
-        end_embed.description = (
-            f"🎊 **Congratulations to the winner!** 🎊\n\n"
-            f"**Winner:** {winner.mention}\n"
-            f"**Seller:** {seller.mention}\n"
-            f"**Final Price:** {format_price(price, auction.currency_symbol)}"
-        )
-    else:
-        end_embed.description = (
-            f"The auction ended with no bids.\n**Seller:** {seller.mention}"
-        )
-
-    # Bring back the thumbnail so people see what was just sold
-    if auction.image_url:
-        end_embed.set_thumbnail(url=auction.image_url)
-
-    # 4. Send to the channel
-    try:
-        await channel.send(embed=end_embed)
-    except Exception as e:
-        print(f"[ERROR] Could not send end message to channel {channel.id}: {e}")
-
-    # 5. DM the Seller
-    try:
-        if winner:
-            await seller.send(
-                f"Your auction for **{auction.item_name}** ended.\n"
-                f"Winner: {winner.display_name} with {format_price(price, auction.currency_symbol)}."
-            )
-        else:
-            await seller.send(
-                f"Your auction for **{auction.item_name}** ended with no bids."
-            )
-    except Exception as e:
-        print(f"[ERROR] Could not DM seller {seller.id}: {e}")
-
-
-# ========== MYSTERY CRATE DROPDOWN VIEW ==========
-
-
-class ItemDropdownView(View):
-    def __init__(self, items, user_id):
-        super().__init__(timeout=60)
-        self.items = items
-        self.user_id = user_id
-        self.message = None
-
-        options = []
-        for i, (item_id, name, url) in enumerate(items[:25]):
-            options.append(
-                discord.SelectOption(
-                    label=f"{name[:50]}", value=str(i), description=f"Item #{item_id}"
-                )
-            )
-
-        self.select = discord.ui.Select(
-            placeholder="Select an item to view...", options=options
-        )
-        self.select.callback = self.select_callback
-        self.add_item(self.select)
-
-        bot.active_views.append(self)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("Not your menu.", ephemeral=True)
-            return False
-        return True
-
-    async def select_callback(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        idx = int(self.select.values[0])
-        item_id, name, url = self.items[idx]
-
-        embed = discord.Embed(title=name, color=discord.Color.blue())
-        if url:
-            embed.set_image(url=url)
-        embed.set_footer(text=f"Item {idx+1} of {len(self.items)}")
-
-        await interaction.edit_original_response(embed=embed, view=self)
-
-    async def on_timeout(self):
-        if self.message:
-            await self.message.edit(view=None)
-        if self in bot.active_views:
-            bot.active_views.remove(self)
 
 
 # ========== MYSTERY CRATE COMMANDS ==========
@@ -906,7 +603,7 @@ async def items(interaction: discord.Interaction):
         )
         return
 
-    view = ItemDropdownView(items, interaction.user.id)
+    view = ItemDropdownView(bot, items, interaction.user.id)
 
     item_id, name, url = items[0]
     embed = discord.Embed(title=name, color=discord.Color.blue())
