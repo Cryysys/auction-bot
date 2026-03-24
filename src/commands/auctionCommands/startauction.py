@@ -30,8 +30,10 @@ def register(bot):
         item: str,
         start_price: str,
         min_increment: str,
-        image_url: str = None,  # <-- Added this
+        image_url: str | None = None,
     ):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return
         role = discord.utils.get(interaction.guild.roles, name="Cryysys")
         if role not in interaction.user.roles:
             await interaction.response.send_message(
@@ -46,6 +48,8 @@ def register(bot):
             return
 
         # Check bot permissions
+        if not isinstance(interaction.channel, discord.TextChannel):
+            return
         perms = interaction.channel.permissions_for(interaction.guild.me)
         if not perms.send_messages:
             await interaction.response.send_message(
@@ -68,7 +72,7 @@ def register(bot):
 
         start_val, currency = parse_amount(start_price)
         min_inc_val, _ = parse_amount(min_increment)
-        if start_val is None or min_inc_val is None:
+        if start_val is None or min_inc_val is None or currency is None:
             await interaction.response.send_message(
                 "Invalid price or increment format. Use numbers, optionally with M or B suffix.",
                 ephemeral=True,
@@ -120,4 +124,4 @@ def register(bot):
         bot.auctions[interaction.channel_id] = auction
 
         auction.end_task = asyncio.create_task(auction_end_timer(bot, auction))
-        auction.reminder_task = asyncio.create_task(auction_reminders(auction))
+        auction.reminder_task = asyncio.create_task(auction_reminders(bot, auction))

@@ -2,7 +2,7 @@ from datetime import timedelta
 import re
 
 
-def parse_duration(duration_str):
+def parse_duration(duration_str: str) -> timedelta | None:
     pattern = re.compile(r"((?P<hours>\d+)h)?((?P<minutes>\d+)m)?")
     match = pattern.fullmatch(duration_str)
     if not match:

@@ -1,9 +1,16 @@
+from __future__ import annotations
 from datetime import datetime, timezone
 import asyncio
+from typing import TYPE_CHECKING
+
 from src.auctionFunctions.finalize_auction import finalize_auction
 
+if TYPE_CHECKING:
+    from src.AuctionBot import AuctionBot
+    from src.Auction import Auction
 
-async def auction_end_timer(bot, auction):
+
+async def auction_end_timer(bot: AuctionBot, auction: Auction) -> None:
     """Wait until the end time and finalize."""
     try:
         # We loop and check every 5 seconds so we can react to extensions

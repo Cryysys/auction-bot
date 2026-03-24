@@ -9,6 +9,12 @@ def register(bot):
     async def addpoints(
         interaction: discord.Interaction, user: discord.Member, amount: int
     ):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                "You need to be in a server to use this command.", ephemeral=True
+            )
+            return
+
         role = discord.utils.get(interaction.guild.roles, name="Cryysys")
         if role not in interaction.user.roles:
             await interaction.response.send_message(

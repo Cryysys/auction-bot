@@ -18,9 +18,9 @@ def register(bot):
             return
 
         # Check if the user is the seller or an admin
-        if (
-            interaction.user != auction.seller
-            and not interaction.user.guild_permissions.administrator
+        if interaction.user != auction.seller and not (
+            isinstance(interaction.user, discord.Member)
+            and interaction.user.guild_permissions.administrator
         ):
             await interaction.response.send_message(
                 "Only the seller or an admin can force-end the auction.", ephemeral=True

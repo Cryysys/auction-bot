@@ -1,7 +1,10 @@
+import discord
+
+
 def register(bot):
     @bot.event
     async def on_raw_reaction_add(payload):
-        if payload.user_id == bot.user.id:
+        if bot.user and payload.user_id == bot.user.id:
             return
         if str(payload.emoji) != "🔔":
             return
@@ -20,7 +23,7 @@ def register(bot):
         bot.notification_prefs[pref_key] = not current
 
         channel = bot.get_channel(payload.channel_id)
-        if channel:
+        if isinstance(channel, discord.TextChannel):
             try:
                 message = await channel.fetch_message(payload.message_id)
                 if not current:
@@ -33,5 +36,5 @@ def register(bot):
                         f"<@{payload.user_id}> will no longer receive outbid notifications.",
                         delete_after=5,
                     )
-            except:
+            except Exception:
                 pass

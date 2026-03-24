@@ -1,7 +1,7 @@
 import re
 
 
-def parse_amount(amount_str):
+def parse_amount(amount_str: str) -> tuple[int, str] | tuple[None, None]:
     original = amount_str.strip()
     amount_str = original.upper()
     multiplier = 1

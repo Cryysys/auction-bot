@@ -1,8 +1,15 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 import discord
 from src.helperFunctions.formatting_helpers import format_price
 
+if TYPE_CHECKING:
+    from src.AuctionBot import AuctionBot
+    from src.Auction import Auction
 
-async def finalize_auction(bot, auction_or_id, forced=False):
+
+async def finalize_auction(bot: AuctionBot, auction_or_id: Auction | int, forced: bool = False) -> None:
     """
     Finalizes the auction.
     Accepts either an Auction object (preferred) or a channel ID (for fallback).

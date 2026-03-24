@@ -9,7 +9,7 @@ class ItemDropdownView(View):
         self.bot = bot
         self.items = items
         self.user_id = user_id
-        self.message = None
+        self.message: discord.InteractionMessage | None = None
 
         options = []
         for i, (item_id, name, url) in enumerate(items[:25]):

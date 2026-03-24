@@ -7,7 +7,10 @@ def register(bot):
         name="draw", description="Draw a random item from the pool (costs points)"
     )
     async def draw(interaction: discord.Interaction):
-        if interaction.channel.name != "mystery-crates":
+        if (
+            not isinstance(interaction.channel, discord.TextChannel)
+            or interaction.channel.name != "mystery-crates"
+        ):
             await interaction.response.send_message(
                 "You can only use `/draw` in #mystery-crates.", ephemeral=True
             )

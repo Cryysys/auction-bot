@@ -1,9 +1,16 @@
+from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
 from src.auctionFunctions.send_reminder_msg import send_reminder_msg
 
+if TYPE_CHECKING:
+    from src.AuctionBot import AuctionBot
+    from src.Auction import Auction
 
-async def auction_reminders(bot, auction):
+
+async def auction_reminders(bot: AuctionBot, auction: Auction) -> None:
     """Accurately send 1-hour and 5-minute reminders by checking every 30s."""
     try:
         while auction.channel.id in bot.auctions:

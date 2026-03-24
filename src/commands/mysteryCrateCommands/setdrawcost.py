@@ -4,9 +4,13 @@ import database
 
 
 def register(bot):
-    @bot.tree.command(name="setdrawcost", description="Set the points required per draw")
+    @bot.tree.command(
+        name="setdrawcost", description="Set the points required per draw"
+    )
     @app_commands.describe(amount="Points per draw")
     async def setdrawcost(interaction: discord.Interaction, amount: int):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return
         role = discord.utils.get(interaction.guild.roles, name="Cryysys")
         if role not in interaction.user.roles:
             await interaction.response.send_message(

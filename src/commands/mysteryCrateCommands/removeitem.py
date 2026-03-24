@@ -4,9 +4,13 @@ import database
 
 
 def register(bot):
-    @bot.tree.command(name="removeitem", description="Remove an item from the pool by ID")
+    @bot.tree.command(
+        name="removeitem", description="Remove an item from the pool by ID"
+    )
     @app_commands.describe(item_id="The ID of the item to remove")
     async def removeitem(interaction: discord.Interaction, item_id: int):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return
         role = discord.utils.get(interaction.guild.roles, name="Cryysys")
         if role not in interaction.user.roles:
             await interaction.response.send_message(

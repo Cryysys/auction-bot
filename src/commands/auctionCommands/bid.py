@@ -91,7 +91,7 @@ def register(bot):
             if auction.message:
                 try:
                     await auction.message.edit(embed=master_embed)
-                except:
+                except Exception:
                     pass
 
             # 4. Create the "New Bid" Embed (The one that goes in the chat now)
@@ -116,14 +116,15 @@ def register(bot):
             if auction.image_url:
                 embed_bid.set_thumbnail(url=auction.image_url)
 
-            bid_message = await interaction.followup.send(embed=embed_bid)
+            bid_message = await interaction.followup.send(embed=embed_bid, wait=True)
 
             # 5. Add Notification Reaction
-            try:
-                await bid_message.add_reaction("🔔")
-                auction.last_bid_message = bid_message
-            except:
-                auction.last_bid_message = None
+            if bid_message:
+                try:
+                    await bid_message.add_reaction("🔔")
+                    auction.last_bid_message = bid_message
+                except Exception:
+                    auction.last_bid_message = None
 
             # 6. Outbid Notification
             if old_highest and old_highest != interaction.user:
@@ -133,7 +134,7 @@ def register(bot):
                         await old_highest.send(
                             f"You've been outbid for **{auction.item_name}**! New price: {format_price(bid_val, auction.currency_symbol)}"
                         )
-                    except:
+                    except Exception:
                         pass
 
         except Exception as e:

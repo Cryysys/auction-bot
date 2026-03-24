@@ -1,7 +1,13 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 import discord
 
+if TYPE_CHECKING:
+    from src.Auction import Auction
 
-async def send_reminder_msg(auction, time_label):
+
+async def send_reminder_msg(auction: Auction, time_label: str) -> None:
     """Helper to handle the logic of who to ping."""
     if auction.bidders:
         mentions = " ".join(f"<@{uid}>" for uid in auction.bidders)

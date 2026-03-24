@@ -1,14 +1,23 @@
+from __future__ import annotations
+import asyncio
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import discord
+    from datetime import datetime
+
+
 class Auction:
     def __init__(
         self,
-        channel,
-        seller,
-        item_name,
-        start_price,
-        min_increment,
-        end_time,
-        start_message,
-        currency_symbol,
+        channel: discord.TextChannel,
+        seller: discord.Member,
+        item_name: str,
+        start_price: int,
+        min_increment: int,
+        end_time: datetime,
+        start_message: discord.Message,
+        currency_symbol: str,
     ):
         self.channel = channel
         self.seller = seller
@@ -23,8 +32,8 @@ class Auction:
         self.currency_symbol = currency_symbol
         self.reminder_1h_sent = False
         self.reminder_5m_sent = False
-        self.end_task = None
-        self.reminder_task = None
-        self.last_bid_message = None
-        self.message = None  # To track the "Live Card"
-        self.image_url = None  # To store the link to the art
+        self.end_task: asyncio.Task | None = None
+        self.reminder_task: asyncio.Task | None = None
+        self.last_bid_message: discord.Message | None = None
+        self.message: discord.Message | None = None
+        self.image_url: str | None = None

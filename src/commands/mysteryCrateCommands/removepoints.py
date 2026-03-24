@@ -9,6 +9,8 @@ def register(bot):
     async def removepoints(
         interaction: discord.Interaction, user: discord.Member, amount: int
     ):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return
         role = discord.utils.get(interaction.guild.roles, name="Cryysys")
         if role not in interaction.user.roles:
             await interaction.response.send_message(
