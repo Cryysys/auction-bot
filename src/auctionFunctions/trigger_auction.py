@@ -1,12 +1,29 @@
-import discord
+from __future__ import annotations
+from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
 import asyncio
-from datetime import datetime, timezone
+import discord
+
 from src.Auction import Auction
 from src.auctionFunctions.auction_end_timer import auction_end_timer
 from src.auctionFunctions.auction_reminders import auction_reminders
-from src.helperFunctions.formatting_helpers import format_price, format_timestamp
+from src.helperFunctions.format_price import format_price
+from src.helperFunctions.format_timestamp import format_timestamp
 
-async def trigger_auction(bot, channel, seller, item_name, delta, start_val, min_inc_val, currency, image_url):
+if TYPE_CHECKING:
+    from src.AuctionBot import AuctionBot
+
+
+async def trigger_auction(
+    bot: AuctionBot,
+    channel: discord.TextChannel,
+    seller: discord.Member,
+    item_name: str,
+    delta: timedelta,
+    start_val: int,
+    min_inc_val: int,
+    image_url: str | None,
+):
     """
     Shared function to actually start the auction, send the embed, and begin tracking.
     Used by BOTH the /startauction command and the background auto-scheduler.
@@ -22,8 +39,8 @@ async def trigger_auction(bot, channel, seller, item_name, delta, start_val, min
         ),
         color=discord.Color.blue(),
     )
-    embed.add_field(name="Current Bid", value=format_price(start_val, currency), inline=True)
-    embed.add_field(name="Min Increment", value=format_price(min_inc_val, currency), inline=True)
+    embed.add_field(name="Current Bid", value=format_price(start_val), inline=True)
+    embed.add_field(name="Min Increment", value=format_price(min_inc_val), inline=True)
     embed.add_field(name="Highest Bidder", value="No bids yet", inline=False)
 
     if image_url:
@@ -41,7 +58,6 @@ async def trigger_auction(bot, channel, seller, item_name, delta, start_val, min
         min_increment=min_inc_val,
         end_time=end_time,
         start_message=start_message,
-        currency_symbol=currency,
     )
 
     auction.message = start_message

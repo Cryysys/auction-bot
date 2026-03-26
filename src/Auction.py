@@ -18,8 +18,7 @@ class Auction:
         min_increment: int,
         end_time: datetime,
         start_message: discord.Message,
-        currency_symbol: str,
-        start_time: datetime | None = None, # Added this
+        start_time: datetime | None = None,
     ):
         self.channel = channel
         self.seller = seller
@@ -31,7 +30,6 @@ class Auction:
         self.highest_bidder: Member | User | None = None
         self.bidders: set[int] = set()
         self.start_message = start_message
-        self.currency_symbol = currency_symbol
         self.reminder_1h_sent = False
         self.reminder_5m_sent = False
         self.end_task: asyncio.Task | None = None
@@ -42,5 +40,4 @@ class Auction:
         self.bid_lock: asyncio.Lock = asyncio.Lock()
         self.start_time = start_time
         self.status = "ACTIVE" if start_time is None else "SCHEDULED"
-        # Make start_message optional since scheduled auctions don't have one yet
         self.start_message = start_message

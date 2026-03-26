@@ -1,8 +1,7 @@
 from __future__ import annotations
-
-import discord
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
+import discord
 
 from src.auctionFunctions.process_bid import process_bid
 

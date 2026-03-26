@@ -1,12 +1,11 @@
 from __future__ import annotations
-
-import discord
-from discord import app_commands
 from datetime import datetime, timezone
+from discord import app_commands
 from typing import TYPE_CHECKING
+import discord
 
 from src.auctionFunctions.process_bid import process_bid
-from src.helperFunctions.formatting_helpers import format_price
+from src.helperFunctions.format_price import format_price
 from src.helperFunctions.parse_amount import parse_amount
 
 if TYPE_CHECKING:
@@ -34,7 +33,7 @@ def register(bot: AuctionBot):
             )
             return
 
-        bid_value, _ = parse_amount(amount)
+        bid_value = parse_amount(amount)
         if bid_value is None:
             await interaction.response.send_message(
                 "Invalid bid format.", ephemeral=True
@@ -51,7 +50,7 @@ def register(bot: AuctionBot):
 
         if bid_value < auction.current_price + auction.min_increment:
             await interaction.response.send_message(
-                f"Bid must be at least **{format_price(auction.current_price + auction.min_increment, auction.currency_symbol)}**.",
+                f"Bid must be at least **{format_price(auction.current_price + auction.min_increment)}**.",
                 ephemeral=True,
             )
             return

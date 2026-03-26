@@ -1,10 +1,10 @@
 from __future__ import annotations
-
-import discord
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
+import discord
 
-from src.helperFunctions.formatting_helpers import format_price, format_timestamp
+from src.helperFunctions.format_price import format_price
+from src.helperFunctions.format_timestamp import format_timestamp
 
 if TYPE_CHECKING:
     from src.Auction import Auction
@@ -32,7 +32,7 @@ async def process_bid(
 
     if bid_value < auction.current_price + auction.min_increment:
         await interaction.followup.send(
-            f"Bid must be at least **{format_price(auction.current_price + auction.min_increment, auction.currency_symbol)}**.",
+            f"Bid must be at least **{format_price(auction.current_price + auction.min_increment)}**.",
             ephemeral=True,
         )
         return
@@ -59,12 +59,12 @@ async def process_bid(
     )
     master_embed.add_field(
         name="Current Bid",
-        value=format_price(auction.current_price, auction.currency_symbol),
+        value=format_price(auction.current_price),
         inline=True,
     )
     master_embed.add_field(
         name="Min Increment",
-        value=format_price(auction.min_increment, auction.currency_symbol),
+        value=format_price(auction.min_increment),
         inline=True,
     )
     master_embed.add_field(
@@ -92,7 +92,7 @@ async def process_bid(
         description=(
             f"**Item:** {auction.item_name}\n"
             f"**Bidder:** {interaction.user.mention}\n"
-            f"**New Price:** {format_price(bid_value, auction.currency_symbol)}\n"
+            f"**New Price:** {format_price(bid_value)}\n"
             f"{extend_msg}\n\n"
             f"🔔 Click the bell on this message to get notified if you're outbid!\n"
             f"**Auction ends ** {format_timestamp(auction.end_time, 'R')}"
@@ -120,7 +120,7 @@ async def process_bid(
         if bot.notification_prefs.get(pref_key, False):
             try:
                 await old_highest.send(
-                    f"You've been outbid for **{auction.item_name}**! New price: {format_price(bid_value, auction.currency_symbol)}"
+                    f"You've been outbid for **{auction.item_name}**! New price: {format_price(bid_value)}"
                 )
             except Exception:
                 pass

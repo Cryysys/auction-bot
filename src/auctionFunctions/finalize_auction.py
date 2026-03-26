@@ -1,16 +1,19 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING
-
-import discord
 from datetime import datetime, timezone
-import database # Import database to fetch upcoming auctions
-from src.helperFunctions.formatting_helpers import format_price
+from typing import TYPE_CHECKING
+import database
+import discord
+
+from src.helperFunctions.format_price import format_price
 
 if TYPE_CHECKING:
     from src.AuctionBot import AuctionBot
     from src.Auction import Auction
 
-async def finalize_auction(bot: AuctionBot, auction_or_id: Auction | int, forced: bool = False) -> None:
+
+async def finalize_auction(
+    bot: AuctionBot, auction_or_id: Auction | int, forced: bool = False
+) -> None:
     if isinstance(auction_or_id, int):
         auction = bot.auctions.pop(auction_or_id, None)
     else:
@@ -35,10 +38,12 @@ async def finalize_auction(bot: AuctionBot, auction_or_id: Auction | int, forced
             f"🎊 **Congratulations to the winner!** 🎊\n\n"
             f"**Winner:** {winner.mention}\n"
             f"**Seller:** {seller.mention}\n"
-            f"**Final Price:** {format_price(price, auction.currency_symbol)}"
+            f"**Final Price:** {format_price(price)}"
         )
     else:
-        end_embed.description = f"The auction ended with no bids.\n**Seller:** {seller.mention}"
+        end_embed.description = (
+            f"The auction ended with no bids.\n**Seller:** {seller.mention}"
+        )
 
     if auction.image_url:
         end_embed.set_thumbnail(url=auction.image_url)
@@ -50,9 +55,9 @@ async def finalize_auction(bot: AuctionBot, auction_or_id: Auction | int, forced
     if upcoming:
         recap_desc = ""
         for row in upcoming:
-            # db_id, ch_id, sell_id, item, dur, price, inc, img, start_t_str, curr
-            db_id, _, _, item, _, _, _, _, start_t_str, _ = row
-            
+            # db_id, ch_id, sell_id, item, dur, price, inc, img, start_t_str
+            db_id, _, _, item, _, _, _, _, start_t_str = row
+
             # Convert string from DB to dynamic Discord timestamp
             start_t = datetime.fromisoformat(start_t_str).replace(tzinfo=timezone.utc)
             unix_time = int(start_t.timestamp())
@@ -61,7 +66,7 @@ async def finalize_auction(bot: AuctionBot, auction_or_id: Auction | int, forced
         recap_embed = discord.Embed(
             title="📅 Coming Up Next...",
             description=recap_desc,
-            color=discord.Color.blue()
+            color=discord.Color.blue(),
         )
         recap_embed.set_footer(text="Use /upcoming to see details and subscribe!")
         await channel.send(embed=recap_embed)
@@ -69,8 +74,13 @@ async def finalize_auction(bot: AuctionBot, auction_or_id: Auction | int, forced
     # 3. DM the Seller
     try:
         if winner:
-            await seller.send(f"Your auction for **{auction.item_name}** ended. Winner: {winner.display_name}.")
+            await seller.send(
+                f"Your auction for **{auction.item_name}** ended. Winner: {winner.display_name}."
+            )
         else:
-            await seller.send(f"Your auction for **{auction.item_name}** ended with no bids.")
-    except:
+            await seller.send(
+                f"Your auction for **{auction.item_name}** ended with no bids."
+            )
+    except Exception:
+        # TODO: Only silently catch specific exception, log error otherwise
         pass

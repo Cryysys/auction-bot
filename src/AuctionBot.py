@@ -1,19 +1,21 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING
-import asyncio
-
-import discord
-from discord.ext import commands, tasks
 from datetime import datetime, timezone
-
+from discord.ext import commands, tasks
+from typing import TYPE_CHECKING
 import database
+import discord
+
 from src.auctionFunctions.trigger_auction import trigger_auction
-from src.helperFunctions.parse_duration import parse_duration
+from src.helperFunctions.get_guild_member import get_guild_member
+from src.helperFunctions.get_text_channel import get_text_channel
+from src.helperFunctions.get_user import get_user
 from src.helperFunctions.parse_amount import parse_amount
+from src.helperFunctions.parse_duration import parse_duration
 
 if TYPE_CHECKING:
     from src.Auction import Auction
     from src.ItemDropdownView import ItemDropdownView
+
 
 class AuctionBot(commands.Bot):
     def __init__(self, intents):
@@ -23,68 +25,84 @@ class AuctionBot(commands.Bot):
         self.active_views: list[ItemDropdownView] = []
 
     async def setup_hook(self):
-        self.check_scheduled_auctions.start() 
+        self.check_scheduled_auctions.start()
         await self.tree.sync()
         print(f"Synced commands for {self.user}")
 
     # --- CATCH BUTTON CLICKS FOR NOTIFICATIONS ---
     async def on_interaction(self, interaction: discord.Interaction):
-        await super().on_interaction(interaction) # Ensure commands still work
-        
-        if interaction.type == discord.InteractionType.component:
-            custom_id = interaction.data.get("custom_id", "")
+        if (
+            interaction.type == discord.InteractionType.component
+            and interaction.data is not None
+        ):
+            custom_id: str = str(interaction.data.get("custom_id", ""))
             if custom_id.startswith("sched_bell_"):
-                db_id = int(custom_id.split("_")[2])
-                
-                # Toggle in DB
-                is_added = database.toggle_scheduled_notif(db_id, interaction.user.id)
-                if is_added:
-                    await interaction.response.send_message("✅ You will get a DM when this auction starts!", ephemeral=True)
+                auction_id = int(custom_id.split("_")[2])
+                item_name = database.get_scheduled_auction_item_name(auction_id)
+                if database.toggle_scheduled_notif(auction_id, interaction.user.id):
+                    await interaction.response.send_message(
+                        f"✅ You will get a DM when the auction for **{item_name}** starts!",
+                        ephemeral=True,
+                    )
                 else:
-                    await interaction.response.send_message("🔕 You will no longer be notified for this auction.", ephemeral=True)
+                    await interaction.response.send_message(
+                        "🔕 You will no longer be notified when the auction for **{item_name}** starts.",
+                        ephemeral=True,
+                    )
 
     # --- BACKGROUND LOOP ---
-    @tasks.loop(seconds=60) 
+    @tasks.loop(seconds=60)
     async def check_scheduled_auctions(self):
-        now = datetime.now(timezone.utc)
-        pending = database.get_pending_auctions() 
-
-        for row in pending:
-            db_id, channel_id, seller_id, item, duration_str, start_price_str, min_inc_str, img_url, start_t_str, currency = row
-            start_t = datetime.fromisoformat(start_t_str).replace(tzinfo=timezone.utc)
-
-            if now >= start_t:
+        for pendingAuction in database.get_pending_auctions():
+            (
+                db_id,
+                channel_id,
+                seller_id,
+                item_name,
+                duration,
+                start_price,
+                min_increment,
+                image_url,
+                start_time,
+            ) = pendingAuction
+            if datetime.now(timezone.utc) >= datetime.fromisoformat(start_time).replace(
+                tzinfo=timezone.utc
+            ):
                 if channel_id not in self.auctions:
                     try:
                         # --- SEND DMs TO SUBSCRIBERS ---
-                        subscribers = database.get_scheduled_notifs(db_id)
-                        for sub_id in subscribers:
+                        for subscriber_id in database.get_scheduled_notifs(db_id):
                             try:
-                                user = self.get_user(sub_id) or await self.fetch_user(sub_id)
-                                await user.send(f"🔔 **The auction for {item} is starting NOW!**\nJump in here: <#{channel_id}>")
-                            except: 
-                                pass # Ignore if they have DMs blocked
-                                
-                        # 1. Fetch Discord objects
-                        channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
-                        seller = channel.guild.get_member(seller_id) or await channel.guild.fetch_member(seller_id)
-                        
-                        # 2. Parse the strings back into usable values
-                        delta = parse_duration(duration_str)
-                        start_val, _ = parse_amount(start_price_str)
-                        min_inc_val, _ = parse_amount(min_inc_str)
+                                user = await get_user(self, subscriber_id)
+                                await user.send(
+                                    f"🔔 **The auction for {item_name} is starting NOW!**\nJump in here: <#{channel_id}>"
+                                )
+                            except Exception:
+                                # TODO: Only ignore exact exception and log error otherwise (e.g. something like discord.DMsBlockedException - if exists)
+                                pass  # Ignore if they have DMs blocked
 
-                        # 3. Fire the auction using the shared helper function!
+                        channel = await get_text_channel(self, channel_id)
+                        seller = await get_guild_member(channel, seller_id)
+
                         await trigger_auction(
-                            bot=self, channel=channel, seller=seller, item_name=item, 
-                            delta=delta, start_val=start_val, min_inc_val=min_inc_val, 
-                            currency=currency, image_url=img_url
+                            bot=self,
+                            channel=channel,
+                            seller=seller,
+                            item_name=item_name,
+                            delta=parse_duration(duration),
+                            start_val=parse_amount(start_price),
+                            min_inc_val=parse_amount(min_increment),
+                            image_url=image_url,
                         )
-                        
-                        # 4. Remove from database so it doesn't start twice
+
+                        # Remove from database so it doesn't start twice
                         database.remove_scheduled_auction(db_id)
-                        
-                    except Exception as e:
-                        print(f"Failed to auto-start scheduled auction for {item}: {e}")
+
+                    except Exception as exception:
+                        print(
+                            f"Failed to auto-start scheduled auction for {item_name}: {exception}"
+                        )
                 else:
-                    print(f"Channel {channel_id} is busy. Waiting to start scheduled auction: {item}")
+                    print(
+                        f"Channel {channel_id} is busy. Waiting to start scheduled auction: {item_name}"
+                    )

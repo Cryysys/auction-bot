@@ -1,22 +1,19 @@
 import re
 
 
-def parse_amount(amount_str: str) -> tuple[int, str] | tuple[None, None]:
-    original = amount_str.strip()
-    amount_str = original.upper()
-    multiplier = 1
-    if amount_str.endswith("B"):
-        amount_str = amount_str[:-1]
-        multiplier = 1_000_000_000
+def parse_amount(amount: str) -> int:
+    cleaned_amount = amount.strip().upper()
+
+    if cleaned_amount.endswith("B"):
+        return int(cleaned_amount[:-1]) * 1_000_000_000
+
     elif (
-        amount_str.endswith("M")
-        or amount_str.endswith("MIL")
-        or amount_str.endswith("MILLION")
+        cleaned_amount.endswith("M")
+        or cleaned_amount.endswith("MIL")
+        or cleaned_amount.endswith("MILLION")
     ):
-        amount_str = re.sub(r"(M|MIL|MILLION)$", "", amount_str)
-        multiplier = 1_000_000
-    try:
-        value = float(amount_str)
-        return int(value * multiplier), ""
-    except ValueError:
-        return None, None
+        return int(re.sub(r"(M|MIL|MILLION)$", "", cleaned_amount)) * 1_000_000
+    elif cleaned_amount.endswith("K"):
+        return int(cleaned_amount[:-1]) * 1000
+
+    return int(cleaned_amount)

@@ -1,6 +1,7 @@
 import discord
 
-from src.helperFunctions.formatting_helpers import format_price, format_timestamp
+from src.helperFunctions.format_price import format_price
+from src.helperFunctions.format_timestamp import format_timestamp
 
 
 def register(bot):
@@ -17,7 +18,7 @@ def register(bot):
         embed = discord.Embed(
             title=f"Auction: {auction.item_name}",
             description=(
-                f"**Current Price:** {format_price(auction.current_price, auction.currency_symbol)}\n"
+                f"**Current Price:** {format_price(auction.current_price)}\n"
                 f"**Highest Bidder:** {highest}\n"
                 f"**Ends:** {format_timestamp(auction.end_time, 'R')}"
             ),

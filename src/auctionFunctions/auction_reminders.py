@@ -1,7 +1,7 @@
 from __future__ import annotations
-import asyncio
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
+import asyncio
 
 from src.auctionFunctions.send_reminder_msg import send_reminder_msg
 

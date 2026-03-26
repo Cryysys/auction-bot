@@ -1,8 +1,7 @@
 from __future__ import annotations
 from datetime import datetime, timezone
-import asyncio
 from typing import TYPE_CHECKING
-
+import asyncio
 from src.auctionFunctions.finalize_auction import finalize_auction
 
 if TYPE_CHECKING:
