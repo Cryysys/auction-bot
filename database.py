@@ -46,6 +46,15 @@ def init_db():
     conn.close()
 
 
+# NEW TABLE FOR NOTIFICATIONS
+    c.execute(
+        """CREATE TABLE IF NOT EXISTS scheduled_notifs (
+                    auction_id INTEGER,
+                    user_id INTEGER,
+                    UNIQUE(auction_id, user_id))""")
+    conn.commit()
+    conn.close()
+
 def add_item(name, image_url):
     conn = get_connection()
     c = conn.cursor()
@@ -179,3 +188,49 @@ def remove_scheduled_auction(row_id):
     c.execute("DELETE FROM scheduled_auctions WHERE id = ?", (row_id,))
     conn.commit()
     conn.close()
+
+def add_scheduled_auction(channel_id, seller_id, item, duration, price, inc, img, start_t, currency):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""INSERT INTO scheduled_auctions 
+                 (channel_id, seller_id, item_name, duration, start_price, min_increment, image_url, start_time, currency_symbol) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", 
+              (channel_id, seller_id, item, duration, price, inc, img, start_t.isoformat(), currency))
+    row_id = c.lastrowid # WE NEED THIS TO RETURN
+    conn.commit()
+    conn.close()
+    return row_id
+
+def toggle_scheduled_notif(auction_id, user_id):
+    """Returns True if added, False if removed"""
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        c.execute("INSERT INTO scheduled_notifs (auction_id, user_id) VALUES (?, ?)", (auction_id, user_id))
+        conn.commit()
+        added = True
+    except sqlite3.IntegrityError:
+        c.execute("DELETE FROM scheduled_notifs WHERE auction_id = ? AND user_id = ?", (auction_id, user_id))
+        conn.commit()
+        added = False
+    conn.close()
+    return added
+
+def get_scheduled_notifs(auction_id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT user_id FROM scheduled_notifs WHERE auction_id = ?", (auction_id,))
+    rows = [r[0] for r in c.fetchall()]
+    conn.close()
+    return rows
+
+def get_channel_upcoming(channel_id, limit=None):
+    conn = get_connection()
+    c = conn.cursor()
+    query = "SELECT * FROM scheduled_auctions WHERE channel_id = ? ORDER BY start_time ASC"
+    if limit:
+        query += f" LIMIT {limit}"
+    c.execute(query, (channel_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
