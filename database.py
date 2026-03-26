@@ -3,57 +3,55 @@ import os
 
 DB_PATH = os.getenv("DATABASE_PATH", "data.db")
 
-
 def get_connection():
     return sqlite3.connect(DB_PATH, check_same_thread=False)
-
 
 def init_db():
     conn = get_connection()
     c = conn.cursor()
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS users
-                 (user_id INTEGER PRIMARY KEY, points INTEGER DEFAULT 0)"""
-    )
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS items
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, image_url TEXT)"""
-    )
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS settings
-                 (key TEXT PRIMARY KEY, value TEXT)"""
-    )
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS draws
+    
+    # 1. Users Table
+    c.execute("""CREATE TABLE IF NOT EXISTS users
+                 (user_id INTEGER PRIMARY KEY, points INTEGER DEFAULT 0)""")
+    
+    # 2. Items Table
+    c.execute("""CREATE TABLE IF NOT EXISTS items
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, image_url TEXT)""")
+    
+    # 3. Settings Table
+    c.execute("""CREATE TABLE IF NOT EXISTS settings
+                 (key TEXT PRIMARY KEY, value TEXT)""")
+    
+    # 4. Draws Table
+    c.execute("""CREATE TABLE IF NOT EXISTS draws
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, item_id INTEGER,
                   drawn_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                   FOREIGN KEY(user_id) REFERENCES users(user_id),
-                  FOREIGN KEY(item_id) REFERENCES items(id))"""
-    )
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS scheduled_auctions 
-        (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    channel_id INTEGER,
-                    seller_id INTEGER,
-                    item_name TEXT,
-                    duration TEXT,
-                    start_price TEXT,
-                    min_increment TEXT,
-                    image_url TEXT,
-                    start_time TIMESTAMP,
-                    currency_symbol TEXT)""")
-    conn.commit()
-    conn.close()
+                  FOREIGN KEY(item_id) REFERENCES items(id))""")
+    
+    # 5. Scheduled Auctions Table
+    c.execute("""CREATE TABLE IF NOT EXISTS scheduled_auctions 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  channel_id INTEGER,
+                  seller_id INTEGER,
+                  item_name TEXT,
+                  duration TEXT,
+                  start_price TEXT,
+                  min_increment TEXT,
+                  image_url TEXT,
+                  start_time TIMESTAMP,
+                  currency_symbol TEXT)""")
 
-
-# NEW TABLE FOR NOTIFICATIONS
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS scheduled_notifs (
+    # 6. Notifications Table
+    c.execute("""CREATE TABLE IF NOT EXISTS scheduled_notifs (
                     auction_id INTEGER,
                     user_id INTEGER,
                     UNIQUE(auction_id, user_id))""")
+    
     conn.commit()
-    conn.close()
+    conn.close() # Now we close it ONLY once at the very end.
+
+# --- ITEM FUNCTIONS ---
 
 def add_item(name, image_url):
     conn = get_connection()
@@ -73,7 +71,6 @@ def remove_item(item_id):
     conn.close()
     return affected > 0
 
-
 def get_all_items():
     conn = get_connection()
     c = conn.cursor()
@@ -82,6 +79,7 @@ def get_all_items():
     conn.close()
     return rows
 
+# --- POINT FUNCTIONS ---
 
 def add_points(user_id, amount):
     conn = get_connection()
@@ -92,7 +90,6 @@ def add_points(user_id, amount):
     )
     conn.commit()
     conn.close()
-
 
 def remove_points(user_id, amount):
     conn = get_connection()
@@ -106,7 +103,6 @@ def remove_points(user_id, amount):
     conn.close()
     return affected > 0
 
-
 def get_points(user_id):
     conn = get_connection()
     c = conn.cursor()
@@ -115,16 +111,14 @@ def get_points(user_id):
     conn.close()
     return row[0] if row else 0
 
+# --- SETTINGS & DRAWS ---
 
 def set_setting(key, value):
     conn = get_connection()
     c = conn.cursor()
-    c.execute(
-        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value)
-    )
+    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
     conn.commit()
     conn.close()
-
 
 def get_setting(key, default=None):
     conn = get_connection()
@@ -134,14 +128,12 @@ def get_setting(key, default=None):
     conn.close()
     return row[0] if row else default
 
-
 def record_draw(user_id, item_id):
     conn = get_connection()
     c = conn.cursor()
     c.execute("INSERT INTO draws (user_id, item_id) VALUES (?, ?)", (user_id, item_id))
     conn.commit()
     conn.close()
-
 
 def draw_random_item():
     conn = get_connection()
@@ -163,6 +155,7 @@ def draw_random_item():
     finally:
         conn.close()
 
+# --- AUCTION FUNCTIONS ---
 
 def add_scheduled_auction(channel_id, seller_id, item, duration, price, inc, img, start_t, currency):
     conn = get_connection()
@@ -171,8 +164,10 @@ def add_scheduled_auction(channel_id, seller_id, item, duration, price, inc, img
                  (channel_id, seller_id, item_name, duration, start_price, min_increment, image_url, start_time, currency_symbol) 
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", 
               (channel_id, seller_id, item, duration, price, inc, img, start_t.isoformat(), currency))
+    row_id = c.lastrowid
     conn.commit()
     conn.close()
+    return row_id
 
 def get_pending_auctions():
     conn = get_connection()
@@ -188,18 +183,6 @@ def remove_scheduled_auction(row_id):
     c.execute("DELETE FROM scheduled_auctions WHERE id = ?", (row_id,))
     conn.commit()
     conn.close()
-
-def add_scheduled_auction(channel_id, seller_id, item, duration, price, inc, img, start_t, currency):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("""INSERT INTO scheduled_auctions 
-                 (channel_id, seller_id, item_name, duration, start_price, min_increment, image_url, start_time, currency_symbol) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", 
-              (channel_id, seller_id, item, duration, price, inc, img, start_t.isoformat(), currency))
-    row_id = c.lastrowid # WE NEED THIS TO RETURN
-    conn.commit()
-    conn.close()
-    return row_id
 
 def toggle_scheduled_notif(auction_id, user_id):
     """Returns True if added, False if removed"""
