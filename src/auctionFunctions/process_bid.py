@@ -71,7 +71,7 @@ async def process_bid(
             await notify_proxy_spent(bot, top_uid, auction)
             del auction.max_bids[top_uid]
 
-    old_highest = auction.highest_bidder
+    old_highest = getattr(auction.highest_bidder, "id", None) if auction.highest_bidder else None
 
     # 3. Update State
     auction.current_price = winning_price
@@ -95,7 +95,7 @@ async def process_bid(
         try: await auction.message.edit(embed=master_embed)
         except Exception: pass
 
-    # 5. Send bid embed
+    # 5. Send bid embed natively to channel (avoids the timeout state bug)
     extend_msg = "\n⏰ **Anti-sniping!** Timer reset to 5:00." if extended else ""
     
     embed_bid = discord.Embed(
@@ -112,11 +112,8 @@ async def process_bid(
     )
     if auction.image_url: embed_bid.set_thumbnail(url=auction.image_url)
 
-    if not interaction.response.is_done():
-        bid_message = await interaction.followup.send(embed=embed_bid, wait=True)
-    else:
-        # If maxbid already deferred/responded, send as a new message to the channel
-        bid_message = await auction.channel.send(embed=embed_bid)
+    # NATIVE SEND -> Stops the interaction timeout completely!
+    bid_message = await auction.channel.send(embed=embed_bid)
 
     try:
         await bid_message.add_reaction("🔔")
@@ -124,12 +121,22 @@ async def process_bid(
     except Exception:
         auction.last_bid_message = None
 
-    # 6. Outbid notification
-    if old_highest and old_highest != auction.highest_bidder and auction.channel.id is not None:
-        pref_key = (auction.channel.id, old_highest.id)
+    # DISMISS THE "WAITING FOR APPLICATION" SCREEN EPHEMERALLY:
+    try:
+        if getattr(winning_user, "id", None) == interaction.user.id:
+            await interaction.followup.send(f"✅ Bid processed! Current lead: {winning_user.display_name}", ephemeral=True)
+        else:
+            await interaction.followup.send(f"⚠️ Your bid was placed, but an Auto-Bidder immediately outbid you! Current lead: {winning_user.display_name} at {format_price(winning_price)}.", ephemeral=True)
+    except Exception as e:
+        print(f"Failed to clear interaction state: {e}")
+
+    # 6. Outbid notification via DM
+    if old_highest and old_highest != getattr(auction.highest_bidder, "id", None) and auction.channel.id is not None:
+        pref_key = (auction.channel.id, old_highest)
         if bot.notification_prefs.get(pref_key, False):
             try:
-                await old_highest.send(
+                old_user = bot.get_user(old_highest) or await bot.fetch_user(old_highest)
+                await old_user.send(
                     f"You've been outbid for **{auction.item_name}**! "
                     f"New price: {format_price(winning_price)}. "
                     f"The auction ends {format_timestamp(auction.end_time, 'R')}, "
