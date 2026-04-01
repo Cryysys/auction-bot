@@ -12,6 +12,7 @@ from src.commands.auctionCommands import quickbid
 from src.commands.auctionCommands import startauction
 from src.commands.auctionCommands import status
 from src.commands.auctionCommands import upcoming
+from src.commands.auctionCommands import maxbid
 
 from src.commands.mysteryCrateCommands import additem
 from src.commands.mysteryCrateCommands import addpoints
@@ -39,6 +40,7 @@ status.register(bot)
 endauction.register(bot)
 on_raw_reaction_add.register(bot)
 upcoming.register(bot)
+maxbid.register(bot)
 
 # ========== MYSTERY CRATE COMMANDS ==========
 
