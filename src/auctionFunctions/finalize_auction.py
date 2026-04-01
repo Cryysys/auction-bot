@@ -83,14 +83,18 @@ async def finalize_auction(
         recap_embed.set_footer(text="Use /upcoming to see details and subscribe!")
         await channel.send(embed=recap_embed)
 
-    # 3. DM the Seller (Preserved!)
+# 3. DM the Seller
     try:
-        msg = f"Your auction for **{auction.item_name}** in {auction.channel.mention} ended"
+        # Base message
+        msg = f"Your auction for **{auction.item_name}** in {auction.channel.mention} has ended.\n"
+        
         if winner:
-            msg += f". Winner: {winner.mention}"
+            # Added final price here
+            msg += f"✅ **Winner:** {winner.display_name}\n"
+            msg += f"💰 **Final Price:** {format_price(price)}"
         else:
-            msg += " with no bids."
+            msg += f"❌ The auction ended with no bids. (Reserve/Start: {format_price(auction.start_price)})"
             
         await seller.send(msg)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[DEBUG] Could not DM seller {seller.id}: {e}")
