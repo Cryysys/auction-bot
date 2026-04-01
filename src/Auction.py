@@ -7,7 +7,6 @@ if TYPE_CHECKING:
     from datetime import datetime
     from discord import Member, User
 
-
 class Auction:
     def __init__(
         self,
@@ -27,11 +26,16 @@ class Auction:
         self.min_increment = min_increment
         self.current_price = start_price
         self.end_time = end_time
+        
         self.highest_bidder: Member | User | None = None
         self.bidders: set[int] = set()
+        self.max_bids: dict[int, int] = {}  # NEW: {user_id: max_amount}
+        
         self.start_message = start_message
+        self.reminder_3h_sent = False       # NEW: 3 hour flag
         self.reminder_1h_sent = False
         self.reminder_5m_sent = False
+        
         self.end_task: asyncio.Task | None = None
         self.reminder_task: asyncio.Task | None = None
         self.last_bid_message: discord.Message | None = None
@@ -40,4 +44,3 @@ class Auction:
         self.bid_lock: asyncio.Lock = asyncio.Lock()
         self.start_time = start_time
         self.status = "ACTIVE" if start_time is None else "SCHEDULED"
-        self.start_message = start_message
