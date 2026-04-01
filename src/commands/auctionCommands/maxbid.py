@@ -17,13 +17,13 @@ def register(bot):
             await interaction.response.send_message("You cannot bid on your own auction.", ephemeral=True)
             return
 
+        # FIXED: Removed the tuple unpacking to match your parse_amount function
         try:
-            val, _ = parse_amount(amount)  # Assuming parse_amount returns (value, currency)
+            val = parse_amount(amount)
         except ValueError:
-            await interaction.response.send_message("Invalid bid format.", ephemeral=True)
+            await interaction.response.send_message("Invalid bid format. Example: 150, 5M", ephemeral=True)
             return
 
-        # They must at least be able to cover the next required bid
         needed_bid = auction.current_price + auction.min_increment
         if auction.highest_bidder is None:
             needed_bid = auction.current_price
@@ -35,7 +35,7 @@ def register(bot):
         await interaction.response.defer(ephemeral=True)
 
         async with auction.bid_lock:
-            # Register the proxy and add them to ping list
+            # Register the proxy
             auction.max_bids[interaction.user.id] = val
             auction.bidders.add(interaction.user.id) 
 
@@ -43,9 +43,11 @@ def register(bot):
             if getattr(auction.highest_bidder, "id", None) != interaction.user.id:
                 try:
                     await process_bid(bot, interaction, auction, needed_bid, "Proxy Auto-Bid!")
-                    # process_bid handles its own followup, so we return
+                    # process_bid handles its own followup, so we return here to avoid double-sending
                     return 
                 except Exception as e:
                     print(f"Error in maxbid process: {e}")
+                    await interaction.followup.send("An error occurred while setting your max bid.", ephemeral=True)
+                    return
 
             await interaction.followup.send(f"✅ Your secret Max Bid of **{format_price(val)}** is set. The bot will defend your position!", ephemeral=True)
