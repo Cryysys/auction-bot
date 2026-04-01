@@ -10,7 +10,6 @@ if TYPE_CHECKING:
     from src.AuctionBot import AuctionBot
     from src.Auction import Auction
 
-
 async def finalize_auction(
     bot: AuctionBot, auction_or_id: Auction | int, forced: bool = False
 ) -> None:
@@ -48,9 +47,22 @@ async def finalize_auction(
     if auction.image_url:
         end_embed.set_thumbnail(url=auction.image_url)
 
+    # Send to the live auction channel
     await channel.send(embed=end_embed)
 
-    # 2. POST-AUCTION RECAP (The new part!)
+    # --- NEW: SEND TO AUCTION ARCHIVE CHANNEL ---
+    archive_channel = discord.utils.get(channel.guild.text_channels, name="auction-archive")
+    if archive_channel:
+        try:
+            # We copy the embed so we can add a footer for the archive 
+            # without it showing up in the main channel's message
+            archive_embed = end_embed.copy()
+            archive_embed.set_footer(text=f"Auction held in #{channel.name}")
+            await archive_channel.send(embed=archive_embed)
+        except Exception as e:
+            print(f"Error sending to archive: {e}")
+
+    # 2. POST-AUCTION RECAP (Preserved!)
     upcoming = database.get_channel_upcoming(channel.id, limit=3)
     if upcoming:
         recap_desc = ""
@@ -71,12 +83,14 @@ async def finalize_auction(
         recap_embed.set_footer(text="Use /upcoming to see details and subscribe!")
         await channel.send(embed=recap_embed)
 
-    # 3. DM the Seller
+    # 3. DM the Seller (Preserved!)
     try:
-        await seller.send(
-            f"Your auction for **{auction.item_name}** in {auction.channel.mention} ended{f". Winner: {winner.mention}" if winner else " with no bids"}."
-        )
-
+        msg = f"Your auction for **{auction.item_name}** in {auction.channel.mention} ended"
+        if winner:
+            msg += f". Winner: {winner.mention}"
+        else:
+            msg += " with no bids."
+            
+        await seller.send(msg)
     except Exception:
-        # TODO: Only silently catch specific exception, log error otherwise
         pass
