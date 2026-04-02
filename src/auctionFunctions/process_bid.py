@@ -182,8 +182,12 @@ async def process_bid(
     await interaction.followup.send(followup_text, ephemeral=True)
 
     # 5. DM Notifications
-    # Notify Auto-Bidders who were outmatched during this bid cycle (with Jump URL)
     for uid in spent_proxies:
+        # --- NEW SPAM PREVENTION ---
+        # If the person who typed the command was instantly defeated, don't spam them with the Outbid DM.
+        if is_maxbid_trigger and uid == command_user.id:
+            continue
+        
         await notify_proxy_spent(bot, uid, auction, msg.jump_url)
 
     # Outbid DM for normal manual bidders (with Jump URL)
