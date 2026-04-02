@@ -33,12 +33,8 @@ def register(bot):
 
         await interaction.response.defer(ephemeral=True)
 
-        async with auction.bid_lock:
-            # Register the proxy
-            auction.max_bids[interaction.user.id] = val
-            auction.bidders.add(interaction.user.id) 
-            
-            # DM Confirmation (Peace of mind for the user)
+        # --- Helper for the DM ---
+        async def send_confirmation_dm():
             try:
                 confirm_embed = discord.Embed(
                     title="🛡️ Auto-Bid Set",
@@ -54,15 +50,27 @@ def register(bot):
             except discord.Forbidden:
                 pass # User has DMs off
 
+        async with auction.bid_lock:
+            # Register the proxy
+            auction.max_bids[interaction.user.id] = val
+            auction.bidders.add(interaction.user.id) 
+
             # If they aren't currently leading, trigger the proxy engine to assert their dominance
             if getattr(auction.highest_bidder, "id", None) != interaction.user.id:
                 try:
                     await process_bid(bot, interaction, auction, needed_bid, "Proxy Auto-Bid!")
-                    # process_bid handles its own followup, so we return here to avoid double-sending
+                    
+                    # NEW: Check if their Auto-Bid survived the battle
+                    if interaction.user.id in auction.max_bids:
+                        await send_confirmation_dm()
+                    
+                    # process_bid handles its own followup, so we return
                     return 
                 except Exception as e:
                     print(f"Error in maxbid process: {e}")
                     await interaction.followup.send("An error occurred while setting your max bid.", ephemeral=True)
                     return
 
+            # If they were ALREADY leading, they just secretly updated their budget. Send DM immediately.
+            await send_confirmation_dm()
             await interaction.followup.send(f"✅ Your secret Max Bid of **{format_price(val)}** is set. The bot will defend your position!", ephemeral=True)
