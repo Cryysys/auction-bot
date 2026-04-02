@@ -7,14 +7,13 @@ from src.helperFunctions.format_price import format_price
 from src.helperFunctions.format_timestamp import format_timestamp
 
 if TYPE_CHECKING:
-    from src.Auction import Auction
     from src.AuctionBot import AuctionBot
+    from src.Auction import Auction
 
 async def notify_proxy_spent(bot, user_id, auction):
-    """Sends a DM to a user when their max bid is outmatched."""
     try:
         user = bot.get_user(user_id) or await bot.fetch_user(user_id)
-        await user.send(f"❌ Your Max Bid for **{auction.item_name}** in {auction.channel.mention} has been outbid!")
+        await user.send(f"❌ Your Auto-Bid for **{auction.item_name}** has been outbid!")
     except Exception:
         pass
 
@@ -23,7 +22,7 @@ async def process_bid(
     interaction: discord.Interaction,
     auction: Auction,
     bid_value: int,
-    embed_title: str,
+    embed_title: str, # We'll check if this is "Proxy Auto-Bid!" to detect command source
 ) -> None:
     now = datetime.now(timezone.utc)
     if now >= auction.end_time:
@@ -31,21 +30,26 @@ async def process_bid(
             await interaction.followup.send("This auction has already ended.", ephemeral=True)
         return
 
-    # 1. NEW ANTI-SNIPE LOGIC (Sets exact remaining time to 5 minutes)
-    time_left = (auction.end_time - now).total_seconds()
+    # 1. Anti-Snipe
     extended = False
-    if time_left < 300: # 5 minutes
+    if (auction.end_time - now).total_seconds() < 300:
         auction.end_time = now + timedelta(minutes=5)
         extended = True
 
-    # 2. PROXY BID RESOLUTION ENGINE
-    winning_user = interaction.user
+    # 2. PROXY RESOLUTION LOGIC
+    command_user = interaction.user
+    is_maxbid_trigger = (embed_title == "Proxy Auto-Bid!")
+    
+    winning_user = command_user
     winning_price = bid_value
     
-    # We resolve proxy wars until no proxy can outbid the current winning_price + min_inc
+    # Track the "Defender" (the person who already had a maxbid set)
+    defender_id = None
+    proxy_war_occurred = False
+
     while True:
-        # Get all proxies EXCEPT the current leader
-        competitors = {uid: amt for uid, amt in auction.max_bids.items() if uid != getattr(winning_user, "id", winning_user)}
+        # Find highest proxy that isn't the current winner
+        competitors = {uid: amt for uid, amt in auction.max_bids.items() if uid != winning_user.id}
         if not competitors:
             break
             
@@ -54,31 +58,76 @@ async def process_bid(
         needed_to_beat = winning_price + auction.min_increment
         
         if top_val >= needed_to_beat:
-            # Proxy outbids the current lead
+            # The existing proxy outbids the new bid
             winning_price = needed_to_beat
             winning_user = bot.get_user(top_uid) or await bot.fetch_user(top_uid)
-            embed_title = "Auto-Bid Placed!"
+            defender_id = top_uid
+            proxy_war_occurred = True
         elif top_val > winning_price:
-            # Proxy is higher, but doesn't have a full increment left. Proxy wins exactly at its max.
+            # The existing proxy is higher, but doesn't have a full increment. It wins at its max.
             winning_price = top_val
             winning_user = bot.get_user(top_uid) or await bot.fetch_user(top_uid)
-            embed_title = "Auto-Bid Placed!"
-            # Proxy is now spent
+            defender_id = top_uid
+            proxy_war_occurred = True
             await notify_proxy_spent(bot, top_uid, auction)
             del auction.max_bids[top_uid]
         else:
-            # The current winning_price beats the highest proxy!
+            # The new bid beats the existing proxy
             await notify_proxy_spent(bot, top_uid, auction)
             del auction.max_bids[top_uid]
 
     old_highest = getattr(auction.highest_bidder, "id", None) if auction.highest_bidder else None
-
-    # 3. Update State
     auction.current_price = winning_price
     auction.highest_bidder = winning_user
-    auction.bidders.add(getattr(winning_user, "id", winning_user))
+    auction.bidders.add(winning_user.id)
 
-    # 4. Update master message
+   # 3. MESSAGE CONSTRUCTION (The UX Part)
+    display_title = "🔨 New Bid Placed"
+    display_color = discord.Color.blue()
+    status_msg = ""
+
+    if winning_user.id == command_user.id:
+        # SCENARIO: The person who typed the command is now leading
+        if is_maxbid_trigger:
+            if proxy_war_occurred:
+                # NEW CHALLENGER BEAT AN OLD AUTO-BID
+                display_title = "⚔️ Auto-Bid Battle"
+                display_color = discord.Color.gold()
+                status_msg = (
+                    f"{command_user.display_name} set a new Auto-Bid and **outmatched** "
+                    f"the previous Auto-Bidder!\n\n"
+                    f"🚀 **{command_user.display_name} has taken the lead.**"
+                )
+            else:
+                # FIRST AUTO-BID SET
+                display_title = "🤖 Auto-Bid Activated"
+                display_color = discord.Color.green()
+                status_msg = f"{command_user.display_name} set a secret max budget and is now leading."
+        else:
+            # NORMAL MANUAL BID
+            status_msg = f"{command_user.display_name} placed a manual bid."
+    else:
+        # SCENARIO: Someone ELSE (the defender) is still leading
+        if is_maxbid_trigger:
+            # NEW CHALLENGER LOST TO AN OLD AUTO-BID
+            display_title = "⚔️ Auto-Bid Battle"
+            display_color = discord.Color.orange()
+            status_msg = (
+                f"{command_user.display_name} set a new Auto-Bid, but it was **outmatched** by "
+                f"{winning_user.display_name}'s existing Auto-Bid.\n\n"
+                f"🛡️ **{winning_user.display_name} remains in the lead.**"
+            )
+        else:
+            # MANUAL BIDDER LOST TO AN OLD AUTO-BID
+            display_title = "🛡️ Auto-Bid Defended"
+            display_color = discord.Color.purple()
+            status_msg = (
+                f"{command_user.display_name} tried to bid, but was **instantly outbid** by "
+                f"{winning_user.display_name}'s active Auto-Bid."
+            )
+
+    # 4. SEND EMBEDS
+    # Update Master Embed
     master_embed = discord.Embed(
         title=f"🎨 Auction: {auction.item_name}",
         description=f"**Seller:** {auction.seller.mention}\n**Ends:** {format_timestamp(auction.end_time, 'R')}",
@@ -87,59 +136,42 @@ async def process_bid(
     master_embed.add_field(name="Current Bid", value=format_price(auction.current_price), inline=True)
     master_embed.add_field(name="Min Increment", value=format_price(auction.min_increment), inline=True)
     master_embed.add_field(name="Highest Bidder", value=auction.highest_bidder.mention, inline=False)
-    
-    if auction.image_url:
-        master_embed.set_thumbnail(url=auction.image_url)
-
-    if auction.message:
+    if auction.image_url: master_embed.set_thumbnail(url=auction.image_url)
+    if auction.message: 
         try: await auction.message.edit(embed=master_embed)
-        except Exception: pass
+        except: pass
 
-    # 5. Send bid embed natively to channel (avoids the timeout state bug)
-    extend_msg = "\n⏰ **Anti-sniping!** Timer reset to 5:00." if extended else ""
-    
-    embed_bid = discord.Embed(
-        title=embed_title,
+    # Send Notification Embed
+    notif_embed = discord.Embed(
+        title=display_title,
         description=(
             f"**Item:** {auction.item_name}\n"
-            f"**Bidder:** {auction.highest_bidder.mention}\n"
-            f"**New Price:** {format_price(winning_price)}\n"
-            f"{extend_msg}\n\n"
-            f"🔔 Click the bell to get outbid notifications!\n"
-            f"**Auction ends** {format_timestamp(auction.end_time, 'R')}"
+            f"**Current Lead:** {winning_user.mention}\n"
+            f"**Price:** {format_price(winning_price)}\n\n"
+            f"{status_msg}"
+            f"{'\n\n⏰ **Anti-sniping!** Timer reset to 5:00.' if extended else ''}"
         ),
-        color=discord.Color.blue(),
+        color=display_color
     )
-    if auction.image_url: embed_bid.set_thumbnail(url=auction.image_url)
+    notif_embed.set_footer(text="Want to bid while offline? Use /maxbid [amount]")
+    if auction.image_url: notif_embed.set_thumbnail(url=auction.image_url)
 
-    # NATIVE SEND -> Stops the interaction timeout completely!
-    bid_message = await auction.channel.send(embed=embed_bid)
+    msg = await auction.channel.send(embed=notif_embed)
+    await msg.add_reaction("🔔")
+    auction.last_bid_message = msg
 
-    try:
-        await bid_message.add_reaction("🔔")
-        auction.last_bid_message = bid_message
-    except Exception:
-        auction.last_bid_message = None
+    # Clear interaction state
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True)
+    
+    followup_text = "✅ Bid processed!" if winning_user.id == command_user.id else "⚠️ You were immediately outbid by an existing Auto-Bid!"
+    await interaction.followup.send(followup_text, ephemeral=True)
 
-    # DISMISS THE "WAITING FOR APPLICATION" SCREEN EPHEMERALLY:
-    try:
-        if getattr(winning_user, "id", None) == interaction.user.id:
-            await interaction.followup.send(f"✅ Bid processed! Current lead: {winning_user.display_name}", ephemeral=True)
-        else:
-            await interaction.followup.send(f"⚠️ Your bid was placed, but an Auto-Bidder immediately outbid you! Current lead: {winning_user.display_name} at {format_price(winning_price)}.", ephemeral=True)
-    except Exception as e:
-        print(f"Failed to clear interaction state: {e}")
-
-    # 6. Outbid notification via DM
-    if old_highest and old_highest != getattr(auction.highest_bidder, "id", None) and auction.channel.id is not None:
+    # 5. Outbid DM (Preserved)
+    if old_highest and old_highest != winning_user.id:
         pref_key = (auction.channel.id, old_highest)
         if bot.notification_prefs.get(pref_key, False):
             try:
-                old_user = bot.get_user(old_highest) or await bot.fetch_user(old_highest)
-                await old_user.send(
-                    f"You've been outbid for **{auction.item_name}**! "
-                    f"New price: {format_price(winning_price)}. "
-                    f"The auction ends {format_timestamp(auction.end_time, 'R')}, "
-                    f"jump in here: {auction.channel.mention}"
-                )
-            except Exception: pass
+                old_u = bot.get_user(old_highest) or await bot.fetch_user(old_highest)
+                await old_u.send(f"You've been outbid for **{auction.item_name}**! New price: {format_price(winning_price)}.")
+            except: pass
