@@ -17,7 +17,6 @@ def register(bot):
             await interaction.response.send_message("You cannot bid on your own auction.", ephemeral=True)
             return
 
-        # FIXED: Removed the tuple unpacking to match your parse_amount function
         try:
             val = parse_amount(amount)
         except ValueError:
@@ -38,6 +37,22 @@ def register(bot):
             # Register the proxy
             auction.max_bids[interaction.user.id] = val
             auction.bidders.add(interaction.user.id) 
+            
+            # DM Confirmation (Peace of mind for the user)
+            try:
+                confirm_embed = discord.Embed(
+                    title="🛡️ Auto-Bid Set",
+                    description=(
+                        f"You have set a maximum budget of **{format_price(val)}** for "
+                        f"**{auction.item_name}** in {interaction.channel.mention}.\n\n"
+                        f"The bot will automatically defend your position until your budget is exceeded. "
+                        f"You will receive another message if you are outbid!"
+                    ),
+                    color=discord.Color.green()
+                )
+                await interaction.user.send(embed=confirm_embed)
+            except discord.Forbidden:
+                pass # User has DMs off
 
             # If they aren't currently leading, trigger the proxy engine to assert their dominance
             if getattr(auction.highest_bidder, "id", None) != interaction.user.id:
