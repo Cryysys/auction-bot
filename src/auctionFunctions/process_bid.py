@@ -10,10 +10,21 @@ if TYPE_CHECKING:
     from src.AuctionBot import AuctionBot
     from src.Auction import Auction
 
-async def notify_proxy_spent(bot, user_id, auction):
+async def notify_proxy_spent(bot, user_id, auction, jump_url: str = None):
     try:
         user = bot.get_user(user_id) or await bot.fetch_user(user_id)
-        await user.send(f"❌ Your Auto-Bid for **{auction.item_name}** has been outbid!")
+        
+        link_text = f"\n\n[Click here to jump to the auction]({jump_url})" if jump_url else ""
+        
+        embed = discord.Embed(
+            title="❌ Auto-Bid Outbid",
+            description=(
+                f"Your Auto-Bid for **{auction.item_name}** in {auction.channel.mention} "
+                f"has been outbid!{link_text}"
+            ),
+            color=discord.Color.red()
+        )
+        await user.send(embed=embed)
     except Exception:
         pass
 
@@ -46,6 +57,9 @@ async def process_bid(
     # Track the "Defender" (the person who already had a maxbid set)
     defender_id = None
     proxy_war_occurred = False
+    
+    # NEW: Track proxies that are outbid during this loop so we can DM them AFTER the channel message is sent
+    spent_proxies = []
 
     while True:
         # Find highest proxy that isn't the current winner
@@ -69,11 +83,11 @@ async def process_bid(
             winning_user = bot.get_user(top_uid) or await bot.fetch_user(top_uid)
             defender_id = top_uid
             proxy_war_occurred = True
-            await notify_proxy_spent(bot, top_uid, auction)
+            spent_proxies.append(top_uid)
             del auction.max_bids[top_uid]
         else:
             # The new bid beats the existing proxy
-            await notify_proxy_spent(bot, top_uid, auction)
+            spent_proxies.append(top_uid)
             del auction.max_bids[top_uid]
 
     old_highest = getattr(auction.highest_bidder, "id", None) if auction.highest_bidder else None
@@ -81,7 +95,7 @@ async def process_bid(
     auction.highest_bidder = winning_user
     auction.bidders.add(winning_user.id)
 
-   # 3. MESSAGE CONSTRUCTION (The UX Part)
+    # 3. MESSAGE CONSTRUCTION (The UX Part)
     display_title = "🔨 New Bid Placed"
     display_color = discord.Color.blue()
     status_msg = ""
@@ -167,11 +181,20 @@ async def process_bid(
     followup_text = "✅ Bid processed!" if winning_user.id == command_user.id else "⚠️ You were immediately outbid by an existing Auto-Bid!"
     await interaction.followup.send(followup_text, ephemeral=True)
 
-    # 5. Outbid DM (Preserved)
+    # 5. DM Notifications
+    # Notify Auto-Bidders who were outmatched during this bid cycle (with Jump URL)
+    for uid in spent_proxies:
+        await notify_proxy_spent(bot, uid, auction, msg.jump_url)
+
+    # Outbid DM for normal manual bidders (with Jump URL)
     if old_highest and old_highest != winning_user.id:
         pref_key = (auction.channel.id, old_highest)
         if bot.notification_prefs.get(pref_key, False):
             try:
                 old_u = bot.get_user(old_highest) or await bot.fetch_user(old_highest)
-                await old_u.send(f"You've been outbid for **{auction.item_name}**! New price: {format_price(winning_price)}.")
+                await old_u.send(
+                    f"You've been outbid for **{auction.item_name}**! "
+                    f"New price: {format_price(winning_price)}.\n"
+                    f"Link: {msg.jump_url}"
+                )
             except: pass
