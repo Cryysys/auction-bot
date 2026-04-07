@@ -155,13 +155,14 @@ async def process_bid(
         try: await auction.message.edit(embed=master_embed)
         except: pass
 
-    # Send Notification Embed
+        # Send Notification Embed
     notif_embed = discord.Embed(
         title=display_title,
         description=(
             f"**Item:** {auction.item_name}\n"
             f"**Current Lead:** {winning_user.mention}\n"
-            f"**Price:** {format_price(winning_price)}\n\n"
+            f"**Price:** {format_price(winning_price)}\n"
+            f"**Ends:** {format_timestamp(auction.end_time, 'R')}\n\n" 
             f"{status_msg}"
             f"{'\n\n⏰ **Anti-sniping!** Timer reset to 5:00.' if extended else ''}"
         ),
