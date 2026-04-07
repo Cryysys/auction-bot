@@ -47,30 +47,24 @@ async def finalize_auction(
     if auction.image_url:
         end_embed.set_thumbnail(url=auction.image_url)
 
-    # Send to the live auction channel
     await channel.send(embed=end_embed)
 
-    # --- NEW: SEND TO AUCTION ARCHIVE CHANNEL ---
+    # --- ARCHIVE LOGIC ---
     archive_channel = discord.utils.get(channel.guild.text_channels, name="auction-archive")
     if archive_channel:
         try:
-            # We copy the embed so we can add a footer for the archive 
-            # without it showing up in the main channel's message
             archive_embed = end_embed.copy()
             archive_embed.set_footer(text=f"Auction held in #{channel.name}")
             await archive_channel.send(embed=archive_embed)
         except Exception as e:
             print(f"Error sending to archive: {e}")
 
-    # 2. POST-AUCTION RECAP (Preserved!)
+    # 2. POST-AUCTION RECAP
     upcoming = database.get_channel_upcoming(channel.id, limit=3)
     if upcoming:
         recap_desc = ""
         for row in upcoming:
-            # db_id, ch_id, sell_id, item, dur, price, inc, img, start_t_str
             db_id, _, _, item, _, _, _, _, start_t_str = row
-
-            # Convert string from DB to dynamic Discord timestamp
             start_t = datetime.fromisoformat(start_t_str).replace(tzinfo=timezone.utc)
             unix_time = int(start_t.timestamp())
             recap_desc += f"• **{item}** — <t:{unix_time}:R>\n"
@@ -83,17 +77,18 @@ async def finalize_auction(
         recap_embed.set_footer(text="Use /upcoming to see details and subscribe!")
         await channel.send(embed=recap_embed)
 
-# 3. DM the Seller
+    # 3. DM THE SELLER (Updated with Tagging)
     try:
-        # Base message
-        msg = f"Your auction for **{auction.item_name}** in {auction.channel.mention} has ended.\n"
-        
         if winner:
-            # Added final price here
-            msg += f"✅ **Winner:** {winner.display_name}\n"
-            msg += f"💰 **Final Price:** {format_price(price)}"
+            # We use both mention (for easy clicking) and name (for clarity)
+            msg = (
+                f"✅ Your auction for **{auction.item_name}** in {auction.channel.mention} has ended!\n\n"
+                f"**Final Price:** {format_price(price)}\n"
+                f"**Winner:** {winner.mention} (`{winner.name}`)\n\n"
+                f"Please contact them to finalize the trade."
+            )
         else:
-            msg += f"❌ The auction ended with no bids. (Reserve/Start: {format_price(auction.start_price)})"
+            msg = f"❌ Your auction for **{auction.item_name}** in {auction.channel.mention} ended with no bids."
             
         await seller.send(msg)
     except Exception as e:
