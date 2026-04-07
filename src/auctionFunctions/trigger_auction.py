@@ -13,7 +13,6 @@ from src.helperFunctions.format_timestamp import format_timestamp
 if TYPE_CHECKING:
     from src.AuctionBot import AuctionBot
 
-
 async def trigger_auction(
     bot: AuctionBot,
     channel: discord.TextChannel,
@@ -25,9 +24,21 @@ async def trigger_auction(
     image_url: str | None,
 ):
     """
-    Shared function to actually start the auction, send the embed, and begin tracking.
-    Used by BOTH the /startauction command and the background auto-scheduler.
+    Shared function to actually start the auction.
+    Now includes a Busy Check and a 2-minute buffer for back-to-back auctions.
     """
+    
+    # 1. BUSY CHECK & BUFFER
+    was_busy = False
+    while channel.id in bot.auctions:
+        was_busy = True
+        await asyncio.sleep(10) # Check every 10 seconds
+
+    if was_busy:
+        # Wait an extra 2 minutes so the channel 'breathes' after the last auction
+        await asyncio.sleep(120)
+
+    # 2. CALCULATION (Done after the wait to ensure full duration)
     end_time = datetime.now(timezone.utc) + delta
 
     # --- THE EMBED LAYOUT ---
