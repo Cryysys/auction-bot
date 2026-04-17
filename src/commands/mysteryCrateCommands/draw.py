@@ -33,7 +33,7 @@ def register(bot):
             )
             return
 
-        database.remove_points(user_id, cost)
+        database.spend_points(user_id, cost)
         database.record_draw(user_id, item[0])
 
         embed = discord.Embed(

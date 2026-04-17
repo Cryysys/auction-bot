@@ -12,45 +12,47 @@ def init_db():
     conn = get_connection()
     c = conn.cursor()
 
-    # 1. Users Table
+    # 1. Users Table (Updated with cumulative_points)
     c.execute(
         """CREATE TABLE IF NOT EXISTS users
-                 (user_id INTEGER PRIMARY KEY, points INTEGER DEFAULT 0)"""
+                  (user_id INTEGER PRIMARY KEY, 
+                   points INTEGER DEFAULT 0,
+                   cumulative_points INTEGER DEFAULT 0)"""
     )
 
     # 2. Items Table
     c.execute(
         """CREATE TABLE IF NOT EXISTS items
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, image_url TEXT)"""
+                  (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, image_url TEXT)"""
     )
 
     # 3. Settings Table
     c.execute(
         """CREATE TABLE IF NOT EXISTS settings
-                 (key TEXT PRIMARY KEY, value TEXT)"""
+                  (key TEXT PRIMARY KEY, value TEXT)"""
     )
 
     # 4. Draws Table
     c.execute(
         """CREATE TABLE IF NOT EXISTS draws
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, item_id INTEGER,
-                  drawn_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                  FOREIGN KEY(user_id) REFERENCES users(user_id),
-                  FOREIGN KEY(item_id) REFERENCES items(id))"""
+                  (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, item_id INTEGER,
+                   drawn_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                   FOREIGN KEY(user_id) REFERENCES users(user_id),
+                   FOREIGN KEY(item_id) REFERENCES items(id))"""
     )
 
     # 5. Scheduled Auctions Table
     c.execute(
         """CREATE TABLE IF NOT EXISTS scheduled_auctions
                   (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  channel_id INTEGER,
-                  seller_id INTEGER,
-                  item_name TEXT,
-                  duration TEXT,
-                  start_price TEXT,
-                  min_increment TEXT,
-                  image_url TEXT,
-                  start_time TIMESTAMP)"""
+                   channel_id INTEGER,
+                   seller_id INTEGER,
+                   item_name TEXT,
+                   duration TEXT,
+                   start_price TEXT,
+                   min_increment TEXT,
+                   image_url TEXT,
+                   start_time TIMESTAMP)"""
     )
 
     # 6. Notifications Table
@@ -62,7 +64,7 @@ def init_db():
     )
 
     conn.commit()
-    conn.close()  # Now we close it ONLY once at the very end.
+    conn.close()
 
 
 # --- ITEM FUNCTIONS ---
@@ -101,17 +103,40 @@ def get_all_items():
 
 
 def add_points(user_id, amount):
+    """Admin/Reward logic: Adds to both Current and All-Time totals."""
     conn = get_connection()
     c = conn.cursor()
     c.execute(
-        "INSERT INTO users (user_id, points) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET points = points + ?",
-        (user_id, amount, amount),
+        """INSERT INTO users (user_id, points, cumulative_points) VALUES (?, ?, ?) 
+           ON CONFLICT(user_id) DO UPDATE SET 
+           points = points + ?, 
+           cumulative_points = cumulative_points + ?""",
+        (user_id, amount, amount, amount, amount),
     )
     conn.commit()
     conn.close()
 
 
 def remove_points(user_id, amount):
+    """Admin Punishment logic: Removes from both Current and All-Time totals."""
+    conn = get_connection()
+    c = conn.cursor()
+    # We use MAX(0, ...) to ensure cumulative doesn't go below zero
+    c.execute(
+        """UPDATE users SET 
+           points = points - ?, 
+           cumulative_points = MAX(0, cumulative_points - ?) 
+           WHERE user_id = ? AND points >= ?""",
+        (amount, amount, user_id, amount),
+    )
+    affected = c.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
+
+
+def spend_points(user_id, amount):
+    """User Spend logic: Removes ONLY from current balance (keeps cumulative high score)."""
     conn = get_connection()
     c = conn.cursor()
     c.execute(
