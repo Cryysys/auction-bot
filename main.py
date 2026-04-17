@@ -25,45 +25,6 @@ from src.commands.mysteryCrateCommands import removepoints
 from src.commands.mysteryCrateCommands import setdrawcost
 from src.commands.mysteryCrateCommands import leaderboard
 
-# --- DATABASE UPGRADE LOGIC ---
-def upgrade_database():
-    db_path = "data.db" # Update this if your file name is different
-    if not os.path.exists(db_path):
-        print(f"⚠️ {db_path} not found. init_db will create it.")
-        return
-
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        # Add cumulative_points column if it doesn't exist
-        print("Checking for cumulative_points column...")
-        cursor.execute("ALTER TABLE users ADD COLUMN cumulative_points INTEGER DEFAULT 0;")
-        
-        # Sync existing points to the new cumulative column
-        print("Syncing historic points...")
-        cursor.execute("UPDATE users SET cumulative_points = points;")
-        
-        conn.commit()
-        print("✅ Database successfully upgraded with cumulative points!")
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" in str(e).lower():
-            print("ℹ️ Database already has cumulative_points column.")
-        else:
-            print(f"❌ SQL Error during upgrade: {e}")
-    except Exception as e:
-        print(f"❌ Unexpected upgrade error: {e}")
-    finally:
-        if 'conn' in locals():
-            conn.close()
-
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-intents.reactions = True
-
-bot = AuctionBot(intents)
-
 # ========== SLASH COMMANDS (AUCTIONS) ==========
 startauction.register(bot)
 bid.register(bot)
